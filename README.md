@@ -4,7 +4,7 @@ A concept website for **Terra Trek**, a fictional slow-travel agency. Its signat
 as you scroll, the camera flies the agency's 42-day route between six cities along glowing great-circle arcs, while a
 boarding-pass card for each city scrolls past.
 
-Live: <!-- LIVE_URL -->
+Live: https://terra-trek-3d.vercel.app
 
 > Concept project — fictional brand.
 
