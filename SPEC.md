@@ -204,7 +204,7 @@ the globe". Coordinates line `00°00′N 00°00′E · NULL ISLAND`.
 | Globe, land dots, arcs, markers, atmosphere, stars | written in code (`src/components/globe/*`) | own work |
 | Continent outlines | hand-plotted lon/lat polygons in code (geographic facts) | own work |
 | No-WebGL poster | inline SVG in code | own work |
-| OG image | `next/og` `ImageResponse` | own work |
+| OG image | static PNG screenshot of the live hero (`opengraph-image.png`) | own work |
 | Favicon | `src/app/icon.svg` | own work |
 | Newsreader, Hanken Grotesk, IBM Plex Mono | Google Fonts via `next/font` | SIL OFL 1.1 |
 

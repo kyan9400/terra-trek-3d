@@ -14,7 +14,7 @@ Live: https://terra-trek-3d.vercel.app
 - three.js 0.186 + React Three Fiber 9 + drei 10 (`PerformanceMonitor`)
 - Lenis 1.3 for smooth scrolling (one smoothing layer)
 - Tailwind CSS 4 (`@theme` tokens) + hand-written component CSS
-- `next/font` (Newsreader, Hanken Grotesk, IBM Plex Mono), `next/og` for the share image
+- `next/font` (Newsreader, Hanken Grotesk, IBM Plex Mono)
 
 GSAP and `@react-three/postprocessing` from the shared stack are intentionally **not installed**: scroll is mapped to
 the camera with a few lines of math (no tweening needed), and the glow is done with additive shaders instead of a

@@ -1,10 +1,18 @@
 import GlobePoster from "@/components/GlobePoster";
+import MobileMenu from "@/components/MobileMenu";
 import MotionToggle from "@/components/MotionToggle";
 import ScrollDirector from "@/components/ScrollDirector";
 import StageLoader from "@/components/StageLoader";
 import SiteFooter from "@/components/SiteFooter";
 import { Logo, Arrow, Check, PlaneIcon } from "@/components/icons";
 import { LEGS, ROUTE, TOTAL_KM, formatCoord, formatKm } from "@/lib/route";
+
+const NAV = [
+  { href: "#routes", label: "Routes" },
+  { href: "#approach", label: "Approach" },
+  { href: "#ways", label: "Ways to go" },
+  { href: "#questions", label: "Questions" },
+];
 
 const STATS = [
   { value: "38", label: "countries routed" },
@@ -93,18 +101,19 @@ export default function Home() {
           </a>
           <nav aria-label="Primary" className="nav">
             <ul>
-              <li><a href="#routes">Routes</a></li>
-              <li><a href="#approach">Approach</a></li>
-              <li><a href="#ways">Ways to go</a></li>
-              <li><a href="#questions">Questions</a></li>
+              {NAV.map((n) => (
+                <li key={n.href}>
+                  <a href={n.href}>{n.label}</a>
+                </li>
+              ))}
             </ul>
           </nav>
           <div className="header-actions">
             <MotionToggle />
-            <a className="btn btn-ember btn-sm" href="#plan">
-              <span className="header-cta-short">Plan</span>
-              <span className="header-cta-long">Plan a route</span>
+            <a className="btn btn-ember btn-sm header-cta" href="#plan">
+              Plan a route
             </a>
+            <MobileMenu links={NAV} cta={{ href: "#plan", label: "Plan a route" }} />
           </div>
         </div>
       </header>

@@ -1,5 +1,5 @@
 /* Orthographic projection of the land mask and route arcs, computed at build time.
-   Shared by the no-WebGL poster and the Open Graph image. */
+   Used by the no-WebGL poster. */
 
 import { ROUTE } from "@/lib/route";
 import { isLand } from "@/components/globe/land";

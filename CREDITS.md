@@ -1,8 +1,9 @@
 # Credits
 
 Everything visual in this project — the globe, land dots, continent outlines, flight arcs, markers, atmosphere,
-stars, the no-WebGL poster, the Open Graph image, the favicon and all icons — is drawn in code written for this
-project. There are **no downloaded images, 3D models, HDRIs, textures or audio files**, and no runtime requests to
+stars, the no-WebGL poster, the favicon and all icons — is drawn in code written for this project. The Open Graph /
+Twitter share image (`src/app/opengraph-image.png`, `twitter-image.png`) is a screenshot of this site's own hero.
+There are **no downloaded images, 3D models, HDRIs, textures or audio files**, and no runtime requests to
 third-party CDNs.
 
 Continent outlines are hand-plotted longitude/latitude polygons (geographic facts, deliberately coarse).
