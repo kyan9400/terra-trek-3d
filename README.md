@@ -39,12 +39,13 @@ bloom pass — less JavaScript and a cheaper GPU frame.
 - `frameloop="demand"`; a continuous loop runs only while full motion is on, the stage is on screen and the tab is visible.
 - Quality tier (low / medium / high) chosen before the canvas exists from the GPU name; `?quality=` overrides.
   DPR cap 1 / 1.5 / 2, adapted at runtime by `PerformanceMonitor`.
-- The 3D chunk loads after the page's `load` event when the main thread is idle; shaders are warmed with
-  `compileAsync` before the canvas fades in over a server-rendered SVG poster of the same globe.
+- The 3D chunk loads after the page's `load` event when the main thread is idle, and only if a tiny GPU probe finds
+  a hardware renderer (software renderers keep the poster; `?quality=` forces 3D on). The scene is built in slices
+  and shaders are warmed with `compileAsync` before the canvas fades in over a server-rendered SVG poster of the same globe.
 - No textures, no per-frame allocations, no React state per frame, no `backdrop-filter` near the canvas.
 - Reduced motion is respected by default, with a "Turn on full motion" toggle (remembered; `?motion=full|reduced`).
   Reduced motion cuts between cities instead of flying.
-- Without WebGL2, or after a lost context, the poster stays and the page works fully.
+- Without WebGL2, on a software renderer, or after a lost context, the poster stays and the page works fully.
 
 Measured with `npm run build`: First Load JS for `/` ≈ 143 KB gzip for modern browsers (182 KB counting the
 `noModule` polyfill); the lazily loaded 3D chunk is ≈ 245 KB gzip.

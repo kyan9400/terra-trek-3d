@@ -8,7 +8,8 @@
    - DPR starts at the tier cap; PerformanceMonitor (only mounted while the
      loop runs, so idle frames are not mistaken for slow ones) lowers it on
      decline and raises it again on incline.
-   - Shaders are compiled with compileAsync before the canvas fades in.
+   - The scene is built in slices (yielding between heavy steps), then its
+     shaders are compiled with compileAsync before the canvas fades in.
    ========================================================================== */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -18,7 +19,7 @@ import type * as THREE from "three";
 import { TIERS, type Tier, type TierSettings } from "@/lib/quality";
 import { isReducedMotion, subscribeMotion } from "@/lib/motion";
 import { stage, subscribeStage } from "@/lib/stage";
-import { GlobeScene } from "./GlobeScene";
+import { GlobeScene, yieldToMain } from "./GlobeScene";
 
 function subscribeLoop(cb: () => void) {
   const offMotion = subscribeMotion(cb);
@@ -45,12 +46,27 @@ function World({ settings, looping, onReady }: WorldProps) {
   const camera = useThree((s) => s.camera);
   const invalidate = useThree((s) => s.invalidate);
   const setFrameloop = useThree((s) => s.setFrameloop);
-  const [world] = useState(() => new GlobeScene(settings));
+  const [world, setWorld] = useState<GlobeScene | null>(null);
 
+  // Build off the critical path: in slices, never in one long task
   useEffect(() => {
-    scene.add(world.root);
-    return () => world.dispose();
-  }, [scene, world]);
+    let alive = true;
+    let made: GlobeScene | null = null;
+    void GlobeScene.create(settings, () => alive).then((w) => {
+      if (!w) return;
+      if (!alive) {
+        w.dispose();
+        return;
+      }
+      made = w;
+      scene.add(w.root);
+      setWorld(w);
+    });
+    return () => {
+      alive = false;
+      made?.dispose();
+    };
+  }, [scene, settings]);
 
   useEffect(() => {
     setFrameloop(looping ? "always" : "demand");
@@ -58,6 +74,7 @@ function World({ settings, looping, onReady }: WorldProps) {
   }, [looping, setFrameloop, invalidate]);
 
   useEffect(() => {
+    if (!world) return;
     stage.invalidate = () => invalidate();
     stage.pick = (x, y) => world.pick(x, y, gl.domElement.clientWidth, gl.domElement.clientHeight);
     return () => {
@@ -68,10 +85,12 @@ function World({ settings, looping, onReady }: WorldProps) {
 
   // Warm-up: compile every shader before the canvas is revealed
   useEffect(() => {
+    if (!world) return;
     let cancelled = false;
     const el = gl.domElement;
     world.update(camera as THREE.PerspectiveCamera, el.clientWidth || 1, el.clientHeight || 1, 0, isReducedMotion(), gl.getPixelRatio());
-    gl.compileAsync(scene, camera)
+    yieldToMain()
+      .then(() => (cancelled ? undefined : gl.compileAsync(scene, camera)))
       .catch(() => undefined)
       .then(() => {
         if (cancelled) return;
@@ -85,6 +104,7 @@ function World({ settings, looping, onReady }: WorldProps) {
   }, [gl, scene, camera, world, invalidate, onReady]);
 
   useFrame((state, delta) => {
+    if (!world) return;
     world.update(
       state.camera as THREE.PerspectiveCamera,
       state.size.width,

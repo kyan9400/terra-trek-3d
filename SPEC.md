@@ -59,19 +59,22 @@ maps scroll directly (no second smoothing layer).
 | medium | 1.5 | 36 000 (≈ 10k) | 1 200 | yes | city lights |
 | low | 1 | 20 000 (≈ 6k) | 500 | no | static stars, no ambient arcs |
 
-Software renderers → low; Intel/AMD integrated, Mali, Adreno, PowerVR, touch devices → at most medium. drei
+Software renderers (SwiftShader, llvmpipe, softpipe, Microsoft Basic Render, or a context that fails
+`failIfMajorPerformanceCaveat`) → no 3D at all: the 3D chunk is never requested and the poster stays (`?quality=` still
+forces the 3D on). Intel/AMD integrated, Mali, Adreno, PowerVR, touch devices → at most medium. drei
 `<PerformanceMonitor>` steps DPR down on decline and back up on incline.
 
 **Render loop.** Continuous only while the stage is on screen, the tab is visible and full motion is on (the arcs flow,
-markers pulse, the globe turns). Otherwise on-demand: scroll / resize call `invalidate()`. Shaders compile with
-`gl.compileAsync` before the canvas fades in over the poster.
+markers pulse, the globe turns). Otherwise on-demand: scroll / resize call `invalidate()`. The scene is built in slices (the land-dot sampling yields
+to the main thread every few thousand samples) and shaders compile with `gl.compileAsync` before the canvas fades in
+over the poster.
 
 **Reduced motion** (OS setting respected by default; "Turn on full motion" toggle in the header, stored in localStorage,
 `?motion=full|reduced` overrides): no autonomous rotation, no pulsing, no flowing dashes, no pointer parallax. The camera
 **cuts** to the city whose card is closest to the viewport centre instead of flying; passed arcs are drawn complete.
 
 **No WebGL / context lost.** A code-made SVG poster (globe disc, graticule, dotted route, six labelled pins) is rendered by
-the server behind the canvas; it stays if WebGL is missing or the context is lost. The page is fully usable without 3D.
+the server behind the canvas; it stays if WebGL is missing, the renderer is software-only, or the context is lost. The page is fully usable without 3D.
 
 ## 5. Design system
 
@@ -210,7 +213,8 @@ Zero downloaded images, models, HDRIs or audio. No runtime CDN requests.
 ## 8. Performance budget
 
 - First-load JS for `/` < 250 KB gzip, excluding the lazily loaded 3D chunk (target ≈ 150 KB).
-- 3D chunk (three + R3F + scene) loaded after hydration with `next/dynamic({ ssr: false })`; ≈ 250 KB gzip.
+- 3D chunk (three + R3F + scene) loaded with `next/dynamic({ ssr: false })` only after window `load` +
+  `requestIdleCallback` (2.5 s timeout) and the GPU probe, never during hydration; ≈ 250 KB gzip.
 - No textures at all (everything procedural); draw calls < 25; ≤ 80k triangles on high.
 - No per-frame allocations, no React state per frame; card highlighting updates the DOM only when the index changes.
 - Fonts: 3 families, `display: swap`, mono not preloaded.

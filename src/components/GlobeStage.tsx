@@ -1,11 +1,11 @@
 "use client";
 
-/* Small client chunk: probes WebGL + GPU tier first, and only then downloads the heavy 3D chunk.
-   Without WebGL (or after a lost context) nothing renders here and the server-rendered poster stays. */
+/* Small client chunk, mounted by StageLoader only after the GPU probe said yes; downloads the heavy 3D chunk.
+   After a lost context (or a renderer that cannot be created) nothing renders here and the poster stays. */
 
 import dynamic from "next/dynamic";
 import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
-import { probeQuality } from "@/lib/quality";
+import type { Probe } from "@/lib/quality";
 
 const GlobeCanvas = dynamic(() => import("./globe/GlobeCanvas"), { ssr: false, loading: () => null });
 
@@ -25,9 +25,8 @@ class CanvasBoundary extends Component<{ onError: () => void; children: ReactNod
   }
 }
 
-export default function GlobeStage() {
-  const [probe] = useState(() => probeQuality());
-  const [state, setState] = useState<State>(probe.webgl ? "loading" : "failed");
+export default function GlobeStage({ probe }: { probe: Probe }) {
+  const [state, setState] = useState<State>("loading");
 
   useEffect(() => {
     document.documentElement.dataset.globe = state;

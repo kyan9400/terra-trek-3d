@@ -306,7 +306,59 @@ const additive = {
   blending: THREE.AdditiveBlending,
 } as const;
 
+/** Give the browser a chance to handle input / paint between heavy steps. */
+export function yieldToMain(): Promise<void> {
+  const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (sched?.yield) return sched.yield();
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Fibonacci samples on the unit sphere that fall on land, computed in slices
+ * (the land test is the costliest CPU step of the build), yielding between them.
+ * Returns null if `alive()` turns false part-way.
+ */
+async function landPositions(n: number, alive: () => boolean): Promise<Float32Array | null> {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const out = new Float32Array(n * 3);
+  let k = 0;
+  const SLICE = 6000;
+  for (let start = 0; start < n; start += SLICE) {
+    if (start > 0) {
+      await yieldToMain();
+      if (!alive()) return null;
+    }
+    const end = Math.min(n, start + SLICE);
+    for (let i = start; i < end; i++) {
+      const y = 1 - (i / (n - 1)) * 2;
+      const r = Math.sqrt(1 - y * y);
+      const th = golden * i;
+      const x = Math.cos(th) * r;
+      const z = Math.sin(th) * r;
+      const lat = Math.asin(y) / DEG;
+      const lon = Math.atan2(x, z) / DEG;
+      if (isLand(lon, lat)) {
+        out[k++] = x;
+        out[k++] = y;
+        out[k++] = z;
+      }
+    }
+  }
+  return out.subarray(0, k);
+}
+
 export class GlobeScene {
+  /** Builds the scene in slices so no single task blocks the main thread for long. */
+  static async create(settings: TierSettings, alive: () => boolean): Promise<GlobeScene | null> {
+    await yieldToMain();
+    if (!alive()) return null;
+    const land = await landPositions(settings.landSamples, alive);
+    if (!land) return null;
+    await yieldToMain();
+    if (!alive()) return null;
+    return new GlobeScene(settings, land);
+  }
+
   readonly root = new THREE.Group();
   private readonly settings: TierSettings;
   private readonly disposables: { dispose: () => void }[] = [];
@@ -339,7 +391,7 @@ export class GlobeScene {
   private lastWide: boolean | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
 
-  constructor(settings: TierSettings) {
+  private constructor(settings: TierSettings, land: Float32Array) {
     this.settings = settings;
     this.cityDirs = ROUTE.map((c) => latLonToVec(c.lat, c.lon));
 
@@ -371,7 +423,7 @@ export class GlobeScene {
         },
       }),
     );
-    this.root.add(this.buildLand());
+    this.root.add(this.buildLand(land));
 
     /* atmosphere */
     this.atmoMat = this.track(
@@ -465,21 +517,8 @@ export class GlobeScene {
     return obj;
   }
 
-  private buildLand() {
-    const n = this.settings.landSamples;
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    const spacing = Math.sqrt((4 * Math.PI) / n);
-    const positions: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const y = 1 - (i / (n - 1)) * 2;
-      const r = Math.sqrt(1 - y * y);
-      const th = golden * i;
-      const x = Math.cos(th) * r;
-      const z = Math.sin(th) * r;
-      const lat = Math.asin(y) / DEG;
-      const lon = Math.atan2(x, z) / DEG;
-      if (isLand(lon, lat)) positions.push(x, y, z);
-    }
+  private buildLand(positions: Float32Array) {
+    const spacing = Math.sqrt((4 * Math.PI) / this.settings.landSamples);
     const count = positions.length / 3;
     const geo = this.track(new THREE.CircleGeometry(spacing * 0.36, 6));
     const rand = new Float32Array(count);
