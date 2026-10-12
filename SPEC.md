@@ -32,55 +32,63 @@ coordinates (boarding-pass detail).
 
 ## 4. Signature 3D moment — the route globe
 
-**What you see.** A night-blue globe made of ~6k–17k round land dots (continents plotted in code from hand-made
-lon/lat outlines), with hand-placed terrain relief (Himalaya, Andes, Rockies, Alps, Atlas, East African highlands,
-Southern Alps, Japanese Alps, Iceland, the Greenland ice dome): high ground lifts, grows a little, shades its slopes
-against the sun and turns snow-white on the day side. A soft cartographic graticule on the ocean, a sun glint broken
-into a glitter path, a fresnel sky reflection, a warm twilight band along the terminator, a thin scattering shell and a
-back-face halo. On the night side, metro areas light up (~80 hand-listed cities), so Europe, Japan and the US East Coast
-read at night. Six destinations carry pulsing ring markers with thin light pillars (they read even at the limb). Ember
-arcs (real great-circle paths lifted by distance) connect them in route order. Stars include a faint Milky Way band.
+**What you see.** A real-looking, painted Earth, made entirely in code. Land comes from the hand-plotted lon/lat
+outlines, softened and ragged by noise so coasts are irregular; it is coloured by climate (rainforest, green belts,
+steppe, sand seas with wind-blown dunes, tundra) from latitude belts plus hand-placed deserts and wet forests, with
+mountain ridges (Himalaya, Andes, Rockies, Alps, Atlas, East African highlands, Southern Alps, Japanese Alps, Iceland)
+lit by relief shading and capped with snow, and ice on Greenland and Antarctica. Oceans are deep blue with a turquoise
+continental shelf and a sun glitter path; a warm terminator band, blue haze toward the limb, a scattering shell and a
+back-face halo make the air. A thin cloud layer drifts slowly (wet equator, clear subtropics, stormy mid-latitudes)
+and shadows the ground on the high tier. On the night side metro areas sparkle (~80 hand-listed cities). Six
+destinations carry pulsing ring markers with light pillars; ember arcs (great-circle paths lifted by distance) connect
+them, and in the hero a light keeps travelling along each arc. Stars include a faint Milky Way band.
 
-**Intro — "lights on".** When the canvas is ready, a loader curtain behind the hero text lifts and, over 1.8 s, the
+**Intro — "lights on".** When the canvas is ready it cross-fades in over the poster globe and, over 1.8 s, the
 terminator sweeps in from the night side, city lights switch on in a west → east wave, the six markers pop in one after
 another and the ghost route draws itself from Reykjavík. Reduced motion: everything is on at once.
 
 **What scroll does.** The canvas is fixed behind the hero and the Routes section. Scroll position is turned into one
 continuous number `p` (−1 = hero, 0…5 = city cards, 6 = outro, 7 = flat map):
-- hero → first card: the camera leaves its slow orbit and descends to Reykjavík (desktop: drag the hero globe to spin
+- hero → first card: the camera leaves its slow orbit and dives to Reykjavík (desktop: drag the hero globe to spin
   it, with inertia that decays in ~1.2 s; never on touch, so it cannot fight scrolling);
+- at every stop the camera is low (≈ 0.4 radii up), steps back south and tilts toward the horizon, so the destination
+  reads as a landscape with the curved horizon and atmosphere above; the clouds part over it. Each chapter has its own
+  light (`LOOKS`): cool arctic light over Iceland, hard desert light over the Atlas and sand, morning at the Cape, dusk
+  with city lights over Japan, crisp mountain light over the Southern Alps, morning over the Andes;
 - between cards: the camera flies a great-circle path to the next city, climbing mid-leg (distance curve `sin(πt)`);
   the active arc draws itself in sync with a short contrail, a tiny chevron aircraft rides the tangent over a glow;
 - outro: the camera pulls back to show the whole route lit;
 - **6 → 7, the unforgettable moment: the globe unrolls into the printed route map.** The sphere peels open at the
   mid-Atlantic seam (lon −45°) into a Pacific-centred 2:1 equirectangular map, so all five legs stay continuous. The
   camera swings east over Africa and the Indian Ocean to face the map while the field of view narrows 34° → 26° (a
-  gentle dolly zoom), the view offset centres, and the palette turns from night to paper: ocean → sand, land → ink
-  dots, arcs → solid rust lines, markers → rust rings; stars and atmosphere fade out. A paper backdrop behind the
+  gentle dolly zoom), the view offset centres, the clouds clear, and the palette turns from the painted earth to paper:
+  surface → sand, halftone ink dots grow in for the land, arcs → solid rust lines, markers → rust rings; stars and atmosphere fade out. A paper backdrop behind the
   transparent canvas fades in, and the perforated top edge of the Approach section continues the paper.
-Land dots near the focused city brighten (focus uniform). Clicking a marker scrolls to that city's card (screen-space
+Clicking a marker scrolls to that city's card (screen-space
 picking with a 26 px radius → ≥ 44 px tap target).
 
 **Technique.** React Three Fiber canvas (`frameloop="demand"`), scene built imperatively in plain three.js
-(`GlobeScene` class): land dots are one instanced draw of 4-vertex quads shaded as SDF discs (alpha-to-coverage with
+(`GlobeScene` class): the earth surface is the uv-grid sphere shaded from two textures built at load time in
+`earth.ts` (an R8 land mask filled by a 2D canvas from the outlines, and a small RGBA texture with terrain height,
+metro light, blurred land cover and aridity) plus value noise; ridges get their relief from finite-difference noise
+gradients (screen-space derivatives would shade them in 2×2 blocks); clouds are a sphere shell with domain-warped noise.
+The map's land dots are one instanced draw of 4-vertex quads shaded as SDF discs (alpha-to-coverage with
 MSAA, discard without); the ocean is a uv grid wrapped into a sphere by its vertex shader; arcs are camera-facing
 ribbons that rebuild the lifted great-circle path in the vertex shader; markers are shader quads, pillars one
 instanced cylindrical billboard draw. The unroll formula lives in `unroll.ts` twice — as GLSL for the ocean, dot and
-arc vertex shaders and as a TS twin for markers, aircraft and picking. Terrain heights, slopes and metro lights are
-precomputed per dot (`terrain.ts`) while the scene is built in slices. Camera framing uses `setViewOffset` so the globe
+arc vertex shaders and as a TS twin for markers, aircraft and picking. The earth textures are computed in row slices that yield to the main thread. Camera framing uses `setViewOffset` so the globe
 sits beside the cards without moving the 3D scene. Scroll is read by one Lenis instance (`lerp 0.1`) — the camera maps
 scroll directly (no second smoothing layer).
 
 **Quality tiers** (decided before the Canvas exists; GPU name via `WEBGL_debug_renderer_info`; `?quality=` overrides):
 
-| tier | DPR cap | land samples (≈ dots) | ocean seg | dot AA | ocean noise | city lights | pillars | aircraft | stars |
-|---|---|---|---|---|---|---|---|---|---|
-| high | 2 | 60 000 (≈ 17.6k) | 160×112 | alpha-to-coverage | 2 octaves | metro clusters + flicker | yes | chevron + glow | 2 400, twinkle |
-| medium | 1.5 | 36 000 (≈ 10.6k) | 128×96 | alpha-to-coverage | 1 octave | metro clusters | yes | chevron + glow | 1 200 |
-| low | 1 | 20 000 (≈ 5.9k) | 96×64 | discard | none | off | yes | glow point | 500 |
+| tier | DPR cap | land samples (≈ map dots) | ocean seg | land mask / geo tex | surface / cloud octaves | cloud shadows | glitter noise | city lights | aircraft | stars |
+|---|---|---|---|---|---|---|---|---|---|---|
+| high | 2 | 60 000 (≈ 17.6k) | 160×112 | 4096 / 512 | 4 / 5 | yes | 2 octaves | yes | chevron + glow | 2 400, twinkle |
+| medium | 1.5 | 36 000 (≈ 10.6k) | 128×96 | 2048 / 512 | 3 / 4 | no | 1 octave | yes | chevron + glow | 1 200 |
+| low | 1 | 20 000 (≈ 5.9k) | 96×64 | 1024 / 256 | 2 / 3 | no | none | off | glow point | 500 |
 
-Ambient Lisbon arcs on high and medium. The unroll runs on every tier. The optional cloud shell was left out: it would
-push the high tier past its triangle budget.
+Ambient Lisbon arcs on high and medium. The unroll runs on every tier. The map dots are hidden (0 cost) until the paper phase.
 
 Software renderers (SwiftShader, llvmpipe, softpipe, Microsoft Basic Render, or a context that fails
 `failIfMajorPerformanceCaveat`) → no 3D at all: the 3D chunk is never requested and the poster stays (`?quality=` still
@@ -91,7 +99,12 @@ forces the 3D on). Intel/AMD integrated, Mali, Adreno, PowerVR, touch devices �
 an ambient ticker asks for ~30 fps (the globe turns, arcs flow, markers pulse); for 1.5 s after any scroll, pointer
 move, drag or the intro it renders every frame (`stage.wake()`). Off stage, hidden tab or reduced motion with nothing
 moving: 0 frames. The scene is built in slices (the land-dot sampling yields to the main thread every few thousand
-samples) and shaders compile with `gl.compileAsync` behind the loader curtain before the canvas is revealed.
+samples) and shaders compile with `gl.compileAsync` while the scene root stays hidden (so no idle frame forces a
+synchronous compile), then the earth textures are uploaded and the canvas is revealed. All noise in the earth and cloud
+shaders is one fetch from a baked 64³ half-float value-noise texture (`noise.ts`) instead of inline hashed noise: on
+ANGLE / D3D11 the inline version took 4–7 s to compile, the texture version under 1 s. Measured on the production build
+(desktop 1440×900, Chrome / ANGLE D3D11): the globe is revealed ≈ 2.3 s after navigation start on low, ≈ 2.8 s on medium (the
+default there), ≈ 3.4 s on high (it was 4.1 / 6.7 / 9.6 s with inline noise).
 
 **Reduced motion** (OS setting respected by default; "Full motion" toggle in the header with `aria-pressed`, stored in
 localStorage, `?motion=full|reduced` overrides): no autonomous rotation, no pulsing, no flowing dashes, no pointer
@@ -140,8 +153,9 @@ rust on paper.
 **Motion (2D)**, transform and opacity only:
 - Hero: a CSS-only split-line reveal — each headline line rises 45 % inside its own clip, no opacity, so the headline
   (the LCP) is painted on the first frame; eyebrow, intro, CTAs and the stats strip fade up after it.
-- A loader curtain (night fill, ember horizon line, static mono `ACQUIRING ROUTE…` label; no animated counter, transform/opacity only; dropped after 12 s if the 3D never gets ready) covers only the stage layer,
-  behind the text, and lifts like a curtain when the 3D is ready; removed instantly when the poster stays.
+- While the 3D warms up the server-rendered poster globe is on the stage, with a short ember horizon line and a static
+  mono `ACQUIRING ROUTE…` label under it (no animated counter; dropped after 12 s if the 3D never gets ready); both fade
+  out as the canvas cross-fades in over the poster, and are removed instantly when the poster stays.
 - A 2 px ember scroll-progress bar under the header; six section dots on the left edge (desktop, fine pointer) — real
   links with 44 px hit areas, the active one an ember pill (`aria-current`), mono labels on hover / focus.
 - Hero stats as a boarding-pass strip (four cells, 1 px rules, Plex Mono labels) and a mono flight strip.

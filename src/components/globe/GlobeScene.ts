@@ -1,10 +1,13 @@
 /* ==========================================================================
    GLOBE SCENE — everything on the canvas, built in code.
-     ocean      sphere + shader: night/day, twilight band, graticule, glitter
-                sun path (value noise, high/medium), fresnel sky reflection
-     land       instanced quads drawn as round SDF dots on a Fibonacci sphere,
-                kept where land.ts says "land"; terrain relief, snow, metro
-                city lights, focus glow
+     surface    the painted earth (earth.ts textures + value noise): ragged
+                coasts, climate belts (forest, steppe, sand seas with dunes),
+                mountain ridges with relief shading, snow and ice, a turquoise
+                shelf, sun glitter on the water, metro lights at night, haze
+     clouds     a thin shell of drifting procedural weather that parts over
+                the destination on the approach (and shadows the ground, high)
+     land dots  instanced SDF dots on a Fibonacci sphere; they only grow in
+                as halftone ink for the printed map
      arcs       camera-facing ribbons along lifted great-circle paths that draw
                 themselves from 0..1 with a bright head and a short contrail
      markers    six shader quads (dot, ring, pulse) + instanced light pillars
@@ -23,6 +26,8 @@ import type { TierSettings } from "@/lib/quality";
 import { stage } from "@/lib/stage";
 import { isLand } from "./land";
 import { cityLight, terrainHeight, terrainSlope } from "./terrain";
+import { buildEarth, type EarthTextures } from "./earth";
+import { NOISE_TEX_GLSL, makeNoiseTexture } from "./noise";
 import { MAP_H, MAP_LON0, MAP_W, UNROLL_GLSL, mapLon, paperProgress, swingProgress, unrollPoint, unrollProgress } from "./unroll";
 
 const EMBER = new THREE.Color("#ff9f43");
@@ -65,23 +70,36 @@ function slerpUnit(a: THREE.Vector3, b: THREE.Vector3, t: number, out: THREE.Vec
 
 /* ---------------------------------------------------------------- shaders */
 
-const NOISE_GLSL = /* glsl */ `
-  float hash3(vec3 p) {
-    p = fract(p * 0.3183099 + 0.1);
-    p *= 17.0;
-    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+/** Value noise from the baked 3D noise texture (noise.ts): small shaders that compile fast. */
+const NOISE_GLSL = NOISE_TEX_GLSL;
+
+/** Clouds: domain-warped value noise on the unit sphere, drifting slowly; cleared around the focused city. */
+const CLOUD_GLSL = /* glsl */ `
+  uniform float uCloudTime;
+  uniform vec3 uFocus;
+  uniform float uClear;
+  float cloudFbm(vec3 p) {
+    float a = 0.5;
+    float s = 0.0;
+    for (int i = 0; i < CLOUD_OCT; i++) {
+      s += a * vnoise(p);
+      p = p * 2.07 + vec3(4.1, 1.3, 7.7);
+      a *= 0.5;
+    }
+    return s;
   }
-  float vnoise(vec3 x) {
-    vec3 i = floor(x);
-    vec3 f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
-      mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y),
-      f.z);
-  }
-  vec3 vnoise3(vec3 x) {
-    return vec3(vnoise(x), vnoise(x + 17.1), vnoise(x + 31.7)) - 0.5;
+  float cloudCover(vec3 p) {
+    vec3 q = p * 3.4 + vec3(uCloudTime * 0.02, 0.0, uCloudTime * 0.011);
+    vec3 w = vec3(vnoise(q * 1.1), vnoise(q * 1.1 + 5.2), vnoise(q * 1.1 + 9.7)) - 0.5;
+    // stretched along the latitude lines a little: weather moves east-west
+    vec3 r = vec3(q.x, q.y * 1.3, q.z) + w * 0.9;
+    float f = cloudFbm(r * 1.9);
+    float al = abs(p.y);
+    // wet equator, dry subtropics, stormy mid-latitudes
+    float bias = 0.07 * exp(-pow(p.y / 0.12, 2.0)) - 0.09 * exp(-pow((al - 0.42) / 0.12, 2.0)) + 0.06 * smoothstep(0.62, 0.85, al);
+    float c = smoothstep(0.5, 0.74, f + bias);
+    c *= 1.0 - uClear * (1.0 - smoothstep(0.05, 0.3, distance(p, uFocus)));
+    return c;
   }
 `;
 
@@ -93,6 +111,7 @@ const OCEAN_VERT = /* glsl */ `
   varying vec3 vP;
   varying vec2 vLL;
   varying vec2 vUv;
+  varying vec2 vTex;
   void main() {
     // a plain uv grid: u spans the map from the seam (lon -45) eastwards, v from pole to pole
     float lat = (uv.y - 0.5) * UR_PI;
@@ -103,9 +122,10 @@ const OCEAN_VERT = /* glsl */ `
     vec4 w = modelMatrix * vec4(p, 1.0);
     vW = w.xyz;
     vN = normalize(mat3(modelMatrix) * nrm);
-    vP = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon)); // sphere point, for the glitter noise
+    vP = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon)); // sphere point, for the noise
     vLL = vec2(degrees(lat), degrees(lon));
     vUv = uv;
+    vTex = vec2(uv.x + UR_LON0 / (2.0 * UR_PI), uv.y); // equirectangular earth textures (repeat in u)
     gl_Position = projectionMatrix * viewMatrix * w;
   }
 `;
@@ -119,12 +139,43 @@ const OCEAN_FRAG = /* glsl */ `
   uniform vec3 uInk;
   uniform float uTime;
   uniform float uPaper;
+  uniform float uLights;
+  uniform float uIntro;
+  uniform float uBump;
+  uniform float uUnroll;
+  uniform float uMaskLod;
+  uniform sampler2D uMask;
+  uniform sampler2D uGeo;
   varying vec3 vN;
   varying vec3 vW;
   varying vec3 vP;
   varying vec2 vLL;
   varying vec2 vUv;
+  varying vec2 vTex;
   ${NOISE_GLSL}
+  ${CLOUD_GLSL}
+
+  float fbm(vec3 p) {
+    float a = 0.5;
+    float s = 0.0;
+    for (int i = 0; i < SURF_OCT; i++) {
+      s += a * vnoise(p);
+      p = p * 2.03 + vec3(1.7, 9.2, 3.1);
+      a *= 0.5;
+    }
+    return s / (1.0 - pow(0.5, float(SURF_OCT)));
+  }
+  float ridged(vec3 p) {
+    float a = 0.5;
+    float s = 0.0;
+    for (int i = 0; i < SURF_OCT; i++) {
+      float r = 1.0 - abs(vnoise(p) * 2.0 - 1.0);
+      s += a * r * r;
+      p = p * 2.13 + vec3(3.3, 1.1, 5.9);
+      a *= 0.5;
+    }
+    return s;
+  }
 
   float gridLine(float coord, float stepDeg) {
     float x = coord / stepDeg;
@@ -134,46 +185,145 @@ const OCEAN_FRAG = /* glsl */ `
   }
 
   void main() {
-    vec3 n = normalize(vN);
-    if (!gl_FrontFacing) n = -n;
+    vec3 n0 = normalize(vN);
+    if (!gl_FrontFacing) n0 = -n0;
     vec3 v = normalize(cameraPosition - vW);
-    float ndl = dot(n, uSun);
-    float day = smoothstep(-0.22, 0.5, ndl);
-
-    vec3 night = vec3(0.022, 0.04, 0.075);
-    vec3 dayc  = vec3(0.05, 0.13, 0.21);
-    vec3 col = mix(night, dayc, day);
-
-    // graticule every 15 degrees, a touch stronger at the equator
     float lat = vLL.x;
     float lon = vLL.y;
-    float g = max(gridLine(lat, 15.0), gridLine(lon, 15.0));
-    float eq = 1.0 - smoothstep(0.0, fwidth(lat) * 1.5, abs(lat));
-    col += uGlacier * (g * 0.045 + eq * 0.05) * (0.4 + 0.6 * day);
+    float alat = abs(lat);
 
-    // sun glint, broken into a glitter path by noise-perturbed normals
-    vec3 ns = n;
+    // ---- what is here: land, height, climate
+    vec4 geo = texture2D(uGeo, vTex);
+    float shelf = texture2D(uGeo, vTex, 3.0).b; // a few mips down: the wide continental shelf
+    float mask = textureLod(uMask, vTex, uMaskLod).r; // softened polygon edges, so noise can rag the coast
+    float pix = length(fwidth(vP)) + 1e-6; // sphere units per pixel: fine noise only where it can be seen
+    float wD = 1.0 - smoothstep(0.12, 0.45, 64.0 * pix);
+    float wE = 1.0 - smoothstep(0.12, 0.45, 190.0 * pix);
+    float nC = fbm(vP * 9.0);           // continental-scale variation
+    float nD = mix(0.5, vnoise(vP * 64.0), wD);  // fine detail
+    float nE = mix(0.5, vnoise(vP * 190.0), wE); // ragged coastlines up close
+    float landF = mix(mask, geo.b, 0.35) + (nC - 0.5) * 0.22 + (nD - 0.5) * 0.2 + (nE - 0.5) * 0.14;
+    float fw = fwidth(landF) + 0.004;
+    float land = smoothstep(0.5 - fw, 0.5 + fw, landF);
+
+    float hBig = geo.r;
+    // mountain ridges: noise plus its gradient by finite differences along east / north
+    // (screen-space derivatives would shade them in 2×2-pixel blocks)
+    float rg = 0.0;
+    vec2 rGrad = vec2(0.0);
+    vec3 east = normalize(vec3(cos(radians(lon)), 0.0, -sin(radians(lon))));
+    vec3 north = cross(vP, east);
+    if (hBig > 0.004) {
+      float eps = max(pix * 1.5, 0.0004);
+      rg = ridged(vP * 34.0);
+      rGrad = vec2(ridged((vP + east * eps) * 34.0), ridged((vP + north * eps) * 34.0)) - rg;
+      rGrad /= eps;
+    }
+    float arid = clamp(geo.a + (nC - 0.5) * 0.45, 0.0, 1.0);
+    float desert = smoothstep(0.62, 0.82, arid) * (1.0 - smoothstep(0.25, 0.5, hBig));
+    // wind-blown dunes in the sand seas, only where they are big enough on screen (the close approach)
+    float duneArg = dot(vP, vec3(520.0, 200.0, 430.0)) + nD * 6.0 + nC * 9.0;
+    float duneVis = 1.0 - smoothstep(0.2, 0.7, fwidth(duneArg));
+    float dune = (sin(duneArg) * 0.5 + 0.5) * duneVis * smoothstep(0.7, 0.88, arid);
+    // smooth noise only in the bump (the bilinear height texture would facet it); height scales the amplitude
+    float amp = smoothstep(0.0, 0.8, hBig);
+    float H = land * (nC * 0.06 + nD * 0.01 + desert * dune * 0.012);
+
+    // ---- relief: bump the normal with the height field (screen-space derivatives)
+    vec3 n = n0;
+    {
+      vec3 dpx = dFdx(vW);
+      vec3 dpy = dFdy(vW);
+      vec3 r1 = cross(dpy, n0);
+      vec3 r2 = cross(n0, dpx);
+      float det = dot(dpx, r1);
+      vec2 dH = vec2(dFdx(H), dFdy(H)) * uBump;
+      vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
+      n = normalize(abs(det) * n0 - grad);
+      // ridges: on the globe east / north are the sphere tangents; they fade out as the map unrolls
+      vec2 rg2 = rGrad * land * amp * 0.6 * uBump * (1.0 - uUnroll) * (1.0 - 0.7 * smoothstep(58.0, 66.0, alat)); // ice sheets are smooth
+      n = normalize(n - east * rg2.x - north * rg2.y);
+    }
+
+    float ndl0 = dot(n0, uSun);
+    float ndl = dot(n, uSun);
+    float day = smoothstep(-0.15, 0.3, ndl0);
+    // low sun is golden, high sun is white
+    vec3 sunCol = mix(vec3(1.0, 0.58, 0.32), vec3(1.0, 0.96, 0.9), smoothstep(0.02, 0.5, ndl0));
+
+    // ---- land colour: climate belts, rock, snow, ice
+    vec3 cForest = vec3(0.06, 0.16, 0.07);
+    vec3 cGreen = vec3(0.2, 0.31, 0.12);
+    vec3 cSteppe = vec3(0.5, 0.44, 0.27);
+    vec3 cSand = mix(vec3(0.6, 0.42, 0.27), vec3(0.87, 0.7, 0.49), smoothstep(0.25, 0.75, nC) * 0.6 + nD * 0.2 + dune * 0.3);
+    vec3 cTundra = vec3(0.34, 0.33, 0.27);
+    vec3 cRock = mix(vec3(0.36, 0.31, 0.26), vec3(0.55, 0.49, 0.42), rg);
+    vec3 cSnow = vec3(0.92, 0.95, 1.0);
+    vec3 lc = mix(cForest, cGreen, smoothstep(0.18, 0.45, arid));
+    lc = mix(lc, cSteppe, smoothstep(0.42, 0.62, arid));
+    lc = mix(lc, cSand, smoothstep(0.6, 0.8, arid));
+    lc = mix(lc, cTundra, smoothstep(55.0, 66.0, alat) * (1.0 - desert));
+    lc *= 0.82 + 0.36 * nC;
+    lc = mix(lc, cRock, smoothstep(0.22, 0.6, hBig * (0.6 + 0.8 * rg)) * 0.85);
+    float snowLine = mix(0.62, 0.16, smoothstep(30.0, 75.0, alat));
+    float snow = smoothstep(snowLine, snowLine + 0.1, hBig * (0.75 + 0.5 * rg));
+    snow = max(snow, smoothstep(73.0, 78.0, lat + nC * 4.0));
+    snow = max(snow, smoothstep(0.06, 0.22, hBig) * smoothstep(58.0, 66.0, alat)); // Greenland ice sheet
+    snow = max(snow, smoothstep(-61.0, -66.0, lat + nC * 4.0));
+    lc = mix(lc, cSnow, snow);
+
+    // ---- ocean colour: deep blue, turquoise over the shelf
+    float shallow = smoothstep(0.02, 0.45, shelf + (nC - 0.5) * 0.1);
+    vec3 oc = mix(vec3(0.008, 0.04, 0.1), vec3(0.015, 0.1, 0.2), smoothstep(0.0, 0.25, shallow));
+    oc = mix(oc, vec3(0.03, 0.27, 0.33), smoothstep(0.35, 0.95, shallow) * 0.8);
+
+    // ---- light it
+    float dif = max(ndl, 0.0);
+    vec3 landLit = lc * sunCol * (dif * 1.12 + 0.03) + lc * vec3(0.02, 0.03, 0.05);
+    vec3 oceanLit = oc * (0.08 + 0.92 * smoothstep(-0.1, 0.6, ndl0)) * mix(vec3(1.0), sunCol, 0.5);
+
+    // sun glint, broken into a glitter path by noise-perturbed normals (water only)
+    vec3 ns = n0;
     #if OCEAN_OCT > 0
-      ns = normalize(ns + vnoise3(vP * 38.0 + vec3(0.0, uTime * 0.12, 0.0)) * 0.36);
+      ns = normalize(ns + vnoise3(vP * 38.0 + vec3(0.0, uTime * 0.12, 0.0)) * 0.12);
     #endif
     #if OCEAN_OCT > 1
-      ns = normalize(ns + vnoise3(vP * 115.0 - vec3(uTime * 0.2, 0.0, 0.0)) * 0.24);
+      ns = normalize(ns + vnoise3(vP * 115.0 - vec3(uTime * 0.2, 0.0, 0.0)) * 0.08 * wD);
     #endif
     vec3 h = normalize(uSun + v);
-    float glint = pow(max(dot(ns, h), 0.0), 90.0) * day;
-    float sheen = pow(max(dot(n, h), 0.0), 16.0) * day;
-    col += mix(uEmber, vec3(1.0, 0.93, 0.8), 0.5) * (glint * 0.5 + sheen * 0.06);
+    float sheen = pow(max(dot(n0, h), 0.0), 18.0) * day;
+    // glitter only inside the broad sun path
+    float glint = pow(max(dot(ns, h), 0.0), 140.0) * day * smoothstep(0.05, 0.6, sheen);
+    float fres = pow(1.0 - max(dot(n0, v), 0.0), 3.0);
+    oceanLit += sunCol * (glint * 0.7 + sheen * 0.26);
+    oceanLit += mix(vec3(0.02, 0.05, 0.1), vec3(0.25, 0.45, 0.65), day) * fres * 0.35;
 
-    // warm twilight band along the terminator
-    float tw = exp(-pow(ndl / 0.12, 2.0));
-    col += mix(uEmber, uDeep, 0.6) * tw * 0.07;
+    vec3 col = mix(oceanLit, landLit, land);
 
-    // fresnel: sky reflection (night blue → glacier) and the rim
-    float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-    col += mix(vec3(0.03, 0.07, 0.15), uGlacier * 0.5, day) * fres * 0.45;
-    col += mix(uGlacier, uEmber, 0.25 * day) * fres * (0.12 + 0.3 * day);
+    #ifdef CLOUD_SHADOW
+      // clouds a little toward the sun cast soft shadows on the ground
+      float cs = cloudCover(normalize(vP + uSun * 0.02));
+      col *= 1.0 - cs * 0.5 * day;
+    #endif
+
+    // ---- night: metro lights, switched on in a west → east wave during the intro
+    float lonN = fract((lon + 180.0) / 360.0);
+    float front = mix(-0.1, 1.15, smoothstep(0.2, 0.85, uIntro));
+    float on = smoothstep(lonN, lonN + 0.06, front);
+    float sparkle = smoothstep(0.6, 0.95, vnoise(vP * 420.0)) * 1.6 + smoothstep(0.55, 0.85, nD) * 0.3;
+    float lights = smoothstep(0.08, 0.9, geo.g) * sparkle * (1.0 - smoothstep(-0.25, 0.08, ndl0)) * uLights * on * land;
+    col += mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.85, 0.6), clamp(lights - 0.6, 0.0, 1.0)) * lights;
+
+    // ---- air: warm twilight band, blue haze toward the limb, glowing rim
+    float tw = exp(-pow(ndl0 / 0.12, 2.0));
+    col += mix(uEmber, uDeep, 0.55) * tw * 0.09;
+    float haze = pow(1.0 - max(dot(n0, v), 0.0), 2.2);
+    col = mix(col, mix(vec3(0.02, 0.05, 0.12), vec3(0.42, 0.66, 0.92), day), haze * 0.55 * smoothstep(-0.35, 0.3, ndl0));
+    col += mix(uGlacier, uEmber, 0.25 * day) * fres * (0.06 + 0.22 * day);
 
     // printed map: sand paper, ink graticule and a thin frame
+    float g = max(gridLine(lat, 15.0), gridLine(lon, 15.0));
+    float eq = 1.0 - smoothstep(0.0, fwidth(lat) * 1.5, abs(lat));
     vec2 e = min(vUv, 1.0 - vUv) / max(fwidth(vUv), vec2(1e-6));
     float frame = 1.0 - smoothstep(0.0, 1.5, min(e.x, e.y));
     vec3 paper = mix(uSand2, uInk, clamp(g * 0.25 + eq * 0.12 + frame * 0.6, 0.0, 1.0));
@@ -183,11 +333,50 @@ const OCEAN_FRAG = /* glsl */ `
   }
 `;
 
+const CLOUD_VERT = /* glsl */ `
+  varying vec3 vNW;
+  varying vec3 vW;
+  varying vec3 vP;
+  void main() {
+    vP = normalize(position);
+    vNW = normalize(mat3(modelMatrix) * normal);
+    vec4 w = modelMatrix * vec4(position, 1.0);
+    vW = w.xyz;
+    gl_Position = projectionMatrix * viewMatrix * w;
+  }
+`;
+
+const CLOUD_FRAG = /* glsl */ `
+  uniform vec3 uSun;
+  uniform vec3 uEmber;
+  uniform float uFade;
+  varying vec3 vNW;
+  varying vec3 vW;
+  varying vec3 vP;
+  ${NOISE_GLSL}
+  ${CLOUD_GLSL}
+  void main() {
+    float c = cloudCover(vP);
+    if (c < 0.003) discard;
+    vec3 n = normalize(vNW);
+    float ndl = dot(n, uSun);
+    float lit = smoothstep(-0.15, 0.45, ndl);
+    vec3 sunCol = mix(vec3(1.0, 0.62, 0.38), vec3(1.0, 0.99, 0.97), smoothstep(0.05, 0.5, ndl));
+    vec3 col = mix(vec3(0.03, 0.045, 0.08), sunCol * (0.82 + 0.18 * c), lit);
+    col += uEmber * exp(-pow(ndl / 0.1, 2.0)) * 0.25;
+    // thin out toward the limb so the edge of the planet stays crisp
+    vec3 v = normalize(cameraPosition - vW);
+    float a = c * 0.9 * uFade * smoothstep(0.0, 0.25, dot(n, v));
+    gl_FragColor = vec4(col * a, a);
+  }
+`;
+
 const DOT_VERT = /* glsl */ `
   attribute vec4 aGeo;   // lat, lon (radians), random, terrain height
   attribute vec3 aExtra; // uphill east, uphill north, city light
   uniform float uUnroll;
   uniform float uSize;
+  uniform float uDotScale;
   ${UNROLL_GLSL}
   varying vec2 vUv;
   varying vec3 vN;
@@ -207,7 +396,7 @@ const DOT_VERT = /* glsl */ `
     vec3 e = normalize(unrollPos(lat, lonR + 0.01, lift, 0.002, tmp) - c);
     vec3 no = unrollPos(lat + 0.01, lonR, lift, 0.002, tmp) - c;
     no = normalize(no - dot(no, e) * e);
-    float size = uSize * (0.75 + aGeo.z * 0.45) * (1.0 + 0.15 * aGeo.w);
+    float size = uSize * uDotScale * (0.75 + aGeo.z * 0.45) * (1.0 + 0.15 * aGeo.w);
     vec4 w = modelMatrix * vec4(c + (e * position.x + no * position.y) * size, 1.0);
     vUv = position.xy;
     vN = normalize(mat3(modelMatrix) * n);
@@ -336,10 +525,15 @@ const ARC_FRAG = /* glsl */ `
   uniform float uIntensity;
   uniform float uTrail;
   uniform float uPaper;
+  uniform float uComet;
+  uniform float uPhase;
   varying float vS;
   varying float vSide;
   void main() {
     float s = vS;
+    // a light that keeps travelling the route (hero): bright head, fading tail
+    float cp = fract(uTime * 0.16 + uPhase) * 1.3 - 0.15;
+    float comet = (smoothstep(cp - 0.22, cp, s) * step(s, cp) * 0.7 + exp(-pow((s - cp) * 60.0, 2.0)) * 1.4) * uComet;
     float drawn = step(s, uDraw);
     float core = pow(max(1.0 - vSide * vSide, 0.0), 0.8);
     float dash = mix(1.0, 0.55 + 0.45 * sin(s * 90.0 - uTime * 4.0), uFlow);
@@ -348,8 +542,8 @@ const ARC_FRAG = /* glsl */ `
     float trail = smoothstep(uDraw - 0.06, uDraw, s) * drawn * live * uTrail; // short contrail behind the head
     float ends = smoothstep(0.0, 0.025, s) * smoothstep(1.0, 0.975, s);
     float ghost = (1.0 - drawn) * uGhost * step(0.55, fract(s * 70.0)) * step(s, uGhostDraw);
-    float a = (drawn * dash * 0.85 + head * 1.6 + trail * 0.8 + ghost) * core * ends * uIntensity;
-    vec3 col = mix(uColor, vec3(1.0, 0.94, 0.82), head * 0.8);
+    float a = (drawn * dash * 0.85 + head * 1.6 + trail * 0.8 + ghost + comet) * core * ends * uIntensity;
+    vec3 col = mix(uColor, vec3(1.0, 0.94, 0.82), clamp(head * 0.8 + comet * 0.45, 0.0, 1.0));
     // printed map: a solid rust line with soft edges
     float pa = drawn * (1.0 - smoothstep(0.55, 1.0, abs(vSide))) * ends;
     col = mix(col, uPaperColor, uPaper);
@@ -683,16 +877,43 @@ function planeGeometry() {
 const MAP_DIR = latLonToVec(0, MAP_LON0);
 const INTRO_SECONDS = 1.8;
 
+/**
+ * Light per chapter, as sun direction in the camera frame [toward camera, right, local north]:
+ * hero, the six stops, then back to the hero light for the outro. Interpolated with the scroll.
+ */
+const LOOKS: [number, number, number][] = [
+  [0.55, 0.8, 0.35], // hero: afternoon, the terminator and the city lights on the left
+  [0.5, 0.75, 0.4], // Reykjavík: cool arctic light over the ice
+  [0.8, 0.5, 0.45], // Marrakech: hard desert light over the Atlas and the sand
+  [0.5, -0.8, 0.3], // Cape Town: morning from the other side
+  [-0.22, 0.9, 0.25], // Kyoto: dusk, Japan's lights come on
+  [0.6, 0.45, 0.6], // Queenstown: crisp high mountain light
+  [0.5, -0.6, 0.6], // Cusco: morning above the clouds
+  [0.55, 0.8, 0.35], // outro: back to the hero light
+];
+
 export class GlobeScene {
   /** Builds the scene in slices so no single task blocks the main thread for long. */
   static async create(settings: TierSettings, alive: () => boolean): Promise<GlobeScene | null> {
     await yieldToMain();
     if (!alive()) return null;
-    const land = await landData(settings.landSamples, settings.cityLights, alive);
-    if (!land) return null;
+    const earth = await buildEarth(settings.maskSize, settings.geoSize, settings.cityLights, alive);
+    if (!earth) return null;
+    await yieldToMain();
+    if (!alive()) {
+      earth.mask.dispose();
+      earth.geo.dispose();
+      return null;
+    }
+    const land = await landData(settings.landSamples, false, alive);
+    if (!land) {
+      earth.mask.dispose();
+      earth.geo.dispose();
+      return null;
+    }
     await yieldToMain();
     if (!alive()) return null;
-    return new GlobeScene(settings, land);
+    return new GlobeScene(settings, land, earth);
   }
 
   readonly root = new THREE.Group();
@@ -719,6 +940,11 @@ export class GlobeScene {
   private readonly aircraft: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
   private readonly pillars: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> | null = null;
   private readonly unrollUniform = { value: 0 };
+  private readonly cloudTime = { value: 0 };
+  private readonly clearUniform = { value: 0 };
+  private readonly focus = new THREE.Vector3(0, 0, 1);
+  private readonly dots: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+  private readonly clouds: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
 
   // scratch objects (reused every frame)
   private readonly v1 = new THREE.Vector3();
@@ -742,7 +968,7 @@ export class GlobeScene {
   private view = { w: 0, h: 0, fov: 0, ox: 0, oy: 0 };
   private camera: THREE.PerspectiveCamera | null = null;
 
-  private constructor(settings: TierSettings, land: LandData) {
+  private constructor(settings: TierSettings, land: LandData, earth: EarthTextures) {
     this.settings = settings;
     this.cityDirs = ROUTE.map((c) => latLonToVec(c.lat, c.lon));
     this.cityLat = ROUTE.map((c) => c.lat * DEG);
@@ -752,13 +978,34 @@ export class GlobeScene {
     const sharedSun = { value: this.sun };
     const uUnroll = this.unrollUniform;
 
-    /* ocean: a uv grid wrapped into a sphere by the shader (seam at lon −45°, so the map opens in the Atlantic) */
+    this.track(earth.mask);
+    this.track(earth.geo);
+    const noise = this.track(makeNoiseTexture());
+    const cloudUniforms = {
+      uNoise: { value: noise },
+      uCloudTime: this.cloudTime,
+      uFocus: { value: this.focus },
+      uClear: this.clearUniform,
+    };
+    const cloudDefines: Record<string, string | number> = { CLOUD_OCT: settings.cloudOct };
+
+    /* the painted earth: a uv grid wrapped into a sphere by the shader (seam at lon −45°, so the map opens in the
+       Atlantic); land, relief, climate, shelf and city lights come from the earth textures + noise */
+    const surfDefines: Record<string, string | number> = { ...cloudDefines, OCEAN_OCT: settings.oceanNoise, SURF_OCT: settings.surfOct };
+    if (settings.cloudShadow) surfDefines.CLOUD_SHADOW = "";
     this.oceanMat = this.track(
       new THREE.ShaderMaterial({
         vertexShader: OCEAN_VERT,
         fragmentShader: OCEAN_FRAG,
-        defines: { OCEAN_OCT: settings.oceanNoise },
+        defines: surfDefines,
         uniforms: {
+          ...cloudUniforms,
+          uMask: { value: earth.mask },
+          uMaskLod: { value: Math.log2(settings.maskSize / 1024) + 0.5 }, // ≈ the same softness on every tier
+          uGeo: { value: earth.geo },
+          uLights: { value: settings.cityLights ? 1 : 0 },
+          uIntro: { value: 0 },
+          uBump: { value: 0.06 },
           uUnroll,
           uSun: sharedSun,
           uGlacier: { value: GLACIER },
@@ -792,6 +1039,7 @@ export class GlobeScene {
         uniforms: {
           uUnroll,
           uSize: { value: Math.sqrt((4 * Math.PI) / settings.landSamples) * 0.36 },
+          uDotScale: { value: 0 },
           uSun: sharedSun,
           uFocus: { value: new THREE.Vector3(0, 0, 1) },
           uFocusAmt: { value: 0 },
@@ -806,7 +1054,24 @@ export class GlobeScene {
         },
       }),
     );
-    this.root.add(this.buildLand(land));
+    this.dots = this.buildLand(land);
+    this.root.add(this.dots);
+
+    /* clouds: a thin shell with drifting procedural weather; it parts around the destination on the approach */
+    this.clouds = new THREE.Mesh(
+      this.track(new THREE.SphereGeometry(1.007, settings.cloudSeg[0], settings.cloudSeg[1])),
+      this.track(
+        new THREE.ShaderMaterial({
+          vertexShader: CLOUD_VERT,
+          fragmentShader: CLOUD_FRAG,
+          defines: cloudDefines,
+          uniforms: { ...cloudUniforms, uSun: sharedSun, uEmber: { value: EMBER }, uFade: { value: 1 } },
+          ...over,
+        }),
+      ),
+    );
+    this.clouds.renderOrder = 1;
+    this.root.add(this.clouds);
 
     /* atmosphere: back-face halo + thin front-face scattering shell */
     const atmoUniforms = () => ({
@@ -995,6 +1260,8 @@ export class GlobeScene {
           uIntensity: { value: intensity },
           uTrail: { value: 1 },
           uPaper: { value: 0 },
+          uComet: { value: 0 },
+          uPhase: { value: this.arcMats.length * 0.29 },
         },
         ...over,
       }),
@@ -1142,6 +1409,17 @@ export class GlobeScene {
     this.root.traverse((o) => (o.visible = true));
   }
 
+  /** Hidden while the shaders compile in the background, so no frame forces a synchronous compile. */
+  setShown(on: boolean) {
+    this.root.visible = on;
+  }
+
+  /** The earth and noise textures, uploaded during the warm-up instead of in the first visible frame. */
+  textures(): THREE.Texture[] {
+    const u = this.oceanMat.uniforms;
+    return [u.uMask.value, u.uGeo.value, u.uNoise.value];
+  }
+
   /* --------------------------------------------------------------- update */
 
   update(camera: THREE.PerspectiveCamera, w: number, h: number, delta: number, reduced: boolean, pixelRatio: number) {
@@ -1177,8 +1455,8 @@ export class GlobeScene {
     const aspect = w / h;
     const k = aspect < 0.85 ? clamp(0.7 / aspect, 1, 1.75) : 1;
     const HERO = 4.3 * k;
-    const NEAR = 2.35 * k;
-    const LIFT = 1.15 * k;
+    const NEAR = 1 + 0.42 * k; // the dive: low over each destination
+    const LIFT = 1.35 * k;
 
     const dirs = this.cityDirs;
     const last = dirs.length - 1;
@@ -1186,6 +1464,8 @@ export class GlobeScene {
     let focusAmt = 0;
     let activeLeg = -1;
     let legT = 0;
+    let lookA = 0;
+    let lookT = 0;
 
     if (p <= 0) {
       const heroLon = -16 + (reduced ? 0 : Math.sin(time * 0.11) * 38) + stage.spin;
@@ -1194,6 +1474,7 @@ export class GlobeScene {
       slerpUnit(this.heroDir, dirs[0], t, this.dir);
       dist = HERO + (NEAR - HERO) * t;
       focusAmt = t;
+      lookT = t;
     } else if (p < last) {
       const i = Math.floor(p);
       const f = p - i;
@@ -1204,11 +1485,15 @@ export class GlobeScene {
       focusAmt = 1 - flight;
       activeLeg = i;
       legT = clamp((f - 0.1) / 0.8);
+      lookA = i + 1;
+      lookT = t;
     } else {
       const t = easeInOut(clamp(p - last));
       slerpUnit(dirs[last], this.outroDir, t * 0.85, this.dir);
       dist = NEAR + (HERO * 1.04 - NEAR) * t;
       focusAmt = 1 - t;
+      lookA = last + 1;
+      lookT = t;
     }
 
     // framing: globe beside the cards (wide) or above them (phones); centred for the map
@@ -1244,19 +1529,38 @@ export class GlobeScene {
         .addScaledVector(this.up, stage.py * 0.025 * par)
         .normalize();
     }
-    camera.position.copy(this.dir).multiplyScalar(dist).add(this.target);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(this.target);
+    // the dive: at a stop the camera drops low, steps back south and tilts toward the horizon
+    const dive = focusAmt * (1 - swing);
+    this.n1.copy(this.up).addScaledVector(this.dir, -this.dir.y).normalize(); // local north
+    camera.position.copy(this.dir).addScaledVector(this.n1, -0.2 * dive).normalize().multiplyScalar(dist).add(this.target);
+    camera.up.copy(this.up).lerp(this.n1, dive).normalize(); // north stays up, also low over the southern stops
+    this.v3.copy(this.dir).multiplyScalar(0.985 * dive).addScaledVector(this.n1, 0.16 * dive).add(this.target);
+    camera.lookAt(this.v3);
+    const camAlt = Math.max(0.05, camera.position.length() - 1);
 
-    // sun from front-right-above; during the intro it sweeps in from the night side
-    this.sun.copy(this.dir).multiplyScalar(0.55).addScaledVector(this.right, 0.8).addScaledVector(this.up, 0.35).normalize();
+    // sun per chapter (LOOKS); during the intro it sweeps in from the night side
+    const la = LOOKS[lookA];
+    const lb = LOOKS[Math.min(lookA + 1, LOOKS.length - 1)];
+    this.sun
+      .copy(this.dir)
+      .multiplyScalar(la[0] + (lb[0] - la[0]) * lookT)
+      .addScaledVector(this.right, la[1] + (lb[1] - la[1]) * lookT)
+      .addScaledVector(this.n1, la[2] + (lb[2] - la[2]) * lookT) // local north, so southern stops are lit alike
+      .normalize();
     const sweep = 1 - easeInOut(smooth(0, 0.75, intro));
     if (sweep > 0) this.sun.applyAxisAngle(this.up, sweep * 2.6);
 
-    // ocean + land
-    this.oceanMat.uniforms.uTime.value = time;
-    this.oceanMat.uniforms.uPaper.value = paper;
+    // painted earth, clouds, print dots (the dots only grow in for the printed map)
+    const om = this.oceanMat.uniforms;
+    om.uTime.value = time;
+    om.uPaper.value = paper;
+    om.uIntro.value = intro;
+    this.cloudTime.value = time;
+    this.focus.copy(this.dir);
+    this.clearUniform.value = dive;
     const du = this.dotMat.uniforms;
+    du.uDotScale.value = smooth(0, 0.6, paper);
+    this.dots.visible = paper > 0.001;
     (du.uFocus.value as THREE.Vector3).copy(this.dir);
     du.uFocusAmt.value = focusAmt * (1 - u);
     du.uIntro.value = intro;
@@ -1265,6 +1569,8 @@ export class GlobeScene {
 
     // arcs; the ghost route draws itself from Reykjavík during the intro
     const ghostDraw = smooth(0.5, 1, intro) * this.legs.length;
+    const thin = clamp(camAlt / 1.35, 0.3, 1) * (1 - swing) + swing; // thinner ribbons on the low approach
+    const comet = reduced ? 0 : clamp(-p * 1.6) * smooth(0.6, 1, intro);
     for (let i = 0; i < this.legs.length; i++) {
       const un = this.legs[i].mesh.material.uniforms;
       let draw: number;
@@ -1276,6 +1582,8 @@ export class GlobeScene {
       un.uGhost.value = p < -0.2 ? 0.32 : 0.2;
       un.uGhostDraw.value = clamp(ghostDraw - i);
       un.uPaper.value = paper;
+      un.uRadius.value = 0.0042 * thin;
+      un.uComet.value = comet;
     }
     if (this.ambient) {
       const am = this.ambient.material.uniforms;
@@ -1283,6 +1591,8 @@ export class GlobeScene {
       am.uTime.value = time * 0.6;
       am.uFlow.value = reduced ? 0 : 1;
       am.uIntensity.value = (0.18 + 0.32 * clamp(-p)) * fade; // strongest in the hero
+      am.uRadius.value = 0.0022 * thin;
+      am.uComet.value = comet * 0.8;
       this.ambient.visible = fade > 0.001;
     }
 
@@ -1294,14 +1604,15 @@ export class GlobeScene {
       this.legPoint(activeLeg, legT, u, this.v2, this.n1);
       this.glow.position.copy(this.v2);
       this.glow.material.uniforms.uPixelRatio.value = pixelRatio;
-      this.glow.material.uniforms.uSize.value = (this.aircraft ? 46 : 70) * (h / 900);
+      const near = clamp(camera.position.distanceTo(this.v2) / 1.35, 0.35, 1);
+      this.glow.material.uniforms.uSize.value = (this.aircraft ? 46 : 70) * (h / 900) * near;
       if (this.aircraft) {
         const fwd = this.legPoint(activeLeg, legT + 0.004, u, this.v1, this.proj);
         fwd.sub(this.legPoint(activeLeg, legT - 0.004, u, this.v3, this.proj)).normalize();
         // "up" is the surface normal at the head (radial on the globe, the map normal on paper)
         this.n1.addScaledVector(fwd, -this.n1.dot(fwd)).normalize();
         this.right.crossVectors(fwd, this.n1);
-        const s = 0.016;
+        const s = 0.016 * near;
         this.basis.makeBasis(this.right, fwd, this.n1).scale(this.v3.set(s, s, s));
         this.basis.setPosition(this.v2.addScaledVector(this.n1, 0.003));
         this.aircraft.matrix.copy(this.basis);
@@ -1326,10 +1637,11 @@ export class GlobeScene {
       mu.uTime.value = time;
       mu.uPulse.value = reduced ? 0 : 1 - paper;
       mu.uPaper.value = paper;
-      m.scale.setScalar((0.8 + 0.5 * active) * pop + 0.0001);
+      const sc = clamp(camera.position.distanceTo(m.position) / 1.35, 0.25, 1); // keep pins a sane size up close
+      m.scale.setScalar((0.8 + 0.5 * active) * pop * sc + 0.0001);
       if (this.pillars) {
         const pu = this.pillars.material.uniforms;
-        (pu.uHeight.value as number[])[i] = (0.06 + 0.06 * near) * pop;
+        (pu.uHeight.value as number[])[i] = (0.06 + 0.06 * near) * pop * (0.5 + 0.5 * sc);
         (pu.uGlow.value as number[])[i] = (0.3 + 0.7 * active) * pop * pillarFade;
       }
     }
@@ -1340,6 +1652,8 @@ export class GlobeScene {
     this.atmo.material.uniforms.uFade.value = airFade;
     this.shell.material.uniforms.uFade.value = airFade;
     this.atmo.visible = this.shell.visible = airFade > 0.001;
+    this.clouds.material.uniforms.uFade.value = 1 - smooth(0, 0.2, u);
+    this.clouds.visible = u < 0.2;
     const sm = this.stars.material.uniforms;
     sm.uPixelRatio.value = pixelRatio;
     sm.uTime.value = time;

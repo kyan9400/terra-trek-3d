@@ -1734,19 +1734,19 @@ html[data-globe-hover] .cursor-dot {
 }
 
 /* ------------------------------------------------------------ stage loader curtain */
+/* While the 3D warms up the poster globe stays visible; the curtain is only a status line under it
+   that fades away when the canvas cross-fades in over the poster. */
 .stage-curtain {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse 70% 60% at 70% 45%, rgba(20, 52, 82, 0.4), transparent 70%),
-    var(--night);
-  transition: transform 0.9s cubic-bezier(0.7, 0, 0.2, 1);
+  pointer-events: none;
+  transition: opacity 0.6s ease;
 }
 .curtain-horizon {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 33%;
+  left: 30%;
+  right: 30%;
+  top: calc(33% + min(59vw, 37svh) + 18px);
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--ember) 50%, transparent);
   transform-origin: 50% 50%;
@@ -1755,7 +1755,7 @@ html[data-globe-hover] .cursor-dot {
 .curtain-label {
   position: absolute;
   left: 50%;
-  top: calc(33% + 14px);
+  top: calc(33% + min(59vw, 37svh) + 30px);
   transform: translateX(-50%);
   font-size: 11px;
   letter-spacing: 0.16em;
@@ -1770,16 +1770,17 @@ html[data-globe-hover] .cursor-dot {
 }
 @media (min-width: 960px) and (min-aspect-ratio: 11/10) {
   .curtain-horizon {
-    top: 50%;
-    left: 40%;
+    top: calc(50% + 28svh);
+    left: 62%;
+    right: 22%;
   }
   .curtain-label {
     left: 70%;
-    top: calc(50% + 14px);
+    top: calc(50% + 28svh + 12px);
   }
 }
 html[data-globe="ready"] .stage-curtain {
-  transform: translateY(-100%);
+  opacity: 0;
 }
 html[data-globe="off"] .stage-curtain,
 html[data-globe="failed"] .stage-curtain,

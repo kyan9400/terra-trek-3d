@@ -8,7 +8,7 @@
 
 type Poly = { pts: number[]; minLon: number; maxLon: number; minLat: number; maxLat: number };
 
-const LAND_RAW: number[][] = [
+export const LAND_RAW: number[][] = [
   // North America (incl. Central America, Baja)
   [
     -168, 66, -162, 70, -156, 71.5, -140, 70, -128, 70, -115, 68.5, -95, 72, -85, 70, -80, 73, -68, 70, -62, 66, -64, 60,
@@ -118,7 +118,7 @@ const LAND_RAW: number[][] = [
   [-65, -63, -57, -63.5, -62, -66, -66, -70, -75, -72],
 ];
 
-const WATER_RAW: number[][] = [
+export const WATER_RAW: number[][] = [
   // Hudson Bay
   [-95, 59, -94, 61, -90, 64, -86, 66.5, -82, 64, -78, 62.5, -77, 60, -77, 55.5, -80, 51.5, -82, 53, -85, 55.3, -89, 56.8, -92.5, 57.2],
   // Black Sea
@@ -153,9 +153,13 @@ function inside(p: Poly, lon: number, lat: number) {
   return hit;
 }
 
+/** Antarctic ice sheet edge: a wavy latitude line instead of a polygon. */
+export function antarcticEdge(lon: number) {
+  return -71 + 3.5 * Math.sin((lon * Math.PI) / 90) + 1.5 * Math.cos((lon * Math.PI) / 45);
+}
+
 export function isLand(lon: number, lat: number) {
-  // Antarctic ice sheet: a wavy latitude line instead of a polygon
-  if (lat < -71 + 3.5 * Math.sin((lon * Math.PI) / 90) + 1.5 * Math.cos((lon * Math.PI) / 45)) return true;
+  if (lat < antarcticEdge(lon)) return true;
   let land = false;
   for (const p of LAND) {
     if (inside(p, lon, lat)) {

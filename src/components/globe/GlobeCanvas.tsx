@@ -62,6 +62,7 @@ function World({ settings, looping, onReady, onHot }: WorldProps) {
         return;
       }
       made = w;
+      w.setShown(false); // stays hidden until its shaders are compiled (no synchronous compile in a frame)
       scene.add(w.root);
       setWorld(w);
     });
@@ -114,12 +115,21 @@ function World({ settings, looping, onReady, onHot }: WorldProps) {
     const el = gl.domElement;
     world.update(camera as THREE.PerspectiveCamera, el.clientWidth || 1, el.clientHeight || 1, 0, isReducedMotion(), gl.getPixelRatio());
     // hidden parts (aircraft, pillars…) are compiled too; the next update() hides them again
-    world.showAllForCompile();
     yieldToMain()
-      .then(() => (cancelled ? undefined : gl.compileAsync(scene, camera)))
+      .then(() => {
+        if (cancelled) return undefined;
+        world.showAllForCompile();
+        // programs are created now and compile in the background (KHR_parallel_shader_compile);
+        // the root stays hidden meanwhile so the idle ticker's frames never wait on them
+        const compiled = gl.compileAsync(scene, camera);
+        world.setShown(false);
+        return compiled;
+      })
       .catch(() => undefined)
       .then(() => {
         if (cancelled) return;
+        world.textures().forEach((t) => gl.initTexture(t));
+        world.setShown(true);
         invalidate();
         // two frames: one to render, one to present; then the curtain lifts and the "lights on" intro starts
         requestAnimationFrame(() =>

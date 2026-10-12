@@ -23,20 +23,29 @@ export type TierSettings = {
   oceanNoise: 0 | 1 | 2; // value-noise octaves that break the sun glint into glitter
   pillars: boolean; // light pillars above the markers
   aircraftMesh: boolean; // tiny chevron plane (else the glow point only)
+  maskSize: number; // width of the painted-earth land mask (equirectangular, height = width / 2)
+  geoSize: number; // width of the terrain / climate / lights texture
+  surfOct: number; // value-noise octaves for coasts, hills and mountain ridges
+  cloudOct: number; // value-noise octaves for the cloud layer
+  cloudShadow: boolean; // clouds darken the ground under them
+  cloudSeg: [number, number]; // cloud shell width × height segments
 };
 
 export const TIERS: Record<Tier, TierSettings> = {
   high: {
     dprCap: 2, antialias: true, landSamples: 60000, stars: 2400, twinkle: true, ambientArcs: true, cityLights: true,
     flicker: true, oceanSeg: [160, 112], oceanNoise: 2, pillars: true, aircraftMesh: true,
+    maskSize: 2048, geoSize: 512, surfOct: 4, cloudOct: 5, cloudShadow: true, cloudSeg: [96, 64],
   },
   medium: {
     dprCap: 1.5, antialias: true, landSamples: 36000, stars: 1200, twinkle: false, ambientArcs: true, cityLights: true,
     flicker: false, oceanSeg: [128, 96], oceanNoise: 1, pillars: true, aircraftMesh: true,
+    maskSize: 2048, geoSize: 512, surfOct: 3, cloudOct: 4, cloudShadow: false, cloudSeg: [80, 48],
   },
   low: {
     dprCap: 1, antialias: false, landSamples: 20000, stars: 500, twinkle: false, ambientArcs: false, cityLights: false,
     flicker: false, oceanSeg: [96, 64], oceanNoise: 0, pillars: true, aircraftMesh: false,
+    maskSize: 1024, geoSize: 256, surfOct: 2, cloudOct: 3, cloudShadow: false, cloudSeg: [64, 32],
   },
 };
 

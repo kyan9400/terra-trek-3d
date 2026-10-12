@@ -47,19 +47,27 @@ const RANGES: Range[] = [
 
 const DEG = Math.PI / 180;
 
+/** Per range: cos(lat centre), cos/sin(rotation), a bounding radius in degrees (cheap early reject). */
+const RANGE_PRE = RANGES.map(([la, , rLa, rLo, , rot]) => {
+  const cl = Math.cos(la * DEG);
+  const r = Math.max(rLa, rLo);
+  return [cl, Math.cos(rot * DEG), Math.sin(rot * DEG), r, r / Math.max(0.2, cl)] as const;
+});
+
 /** Height 0..1 at a lat/lon (degrees). Smooth, overlapping ranges take the maximum. */
 export function terrainHeight(lat: number, lon: number) {
   let h = 0;
   for (let i = 0; i < RANGES.length; i++) {
-    const [la, lo, rLa, rLo, height, rot] = RANGES[i];
+    const [la, lo, rLa, rLo, height] = RANGES[i];
+    const [cl, c, s, rLat, rLon] = RANGE_PRE[i];
+    const y = lat - la;
+    if (y > rLat || y < -rLat) continue;
     let dLon = lon - lo;
     if (dLon > 180) dLon -= 360;
     else if (dLon < -180) dLon += 360;
+    if (dLon > rLon || dLon < -rLon) continue;
     // local flat frame around the range centre (degrees, east compressed by latitude)
-    const x = dLon * Math.cos(la * DEG);
-    const y = lat - la;
-    const c = Math.cos(rot * DEG);
-    const s = Math.sin(rot * DEG);
+    const x = dLon * cl;
     const u = (x * c + y * s) / rLo;
     const v = (-x * s + y * c) / rLa;
     const d2 = u * u + v * v;
