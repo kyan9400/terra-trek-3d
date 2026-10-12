@@ -1,3 +1,4 @@
+import FlatMap from "@/components/FlatMap";
 import GlobePoster from "@/components/GlobePoster";
 import MobileMenu from "@/components/MobileMenu";
 import MotionToggle from "@/components/MotionToggle";
@@ -83,6 +84,19 @@ const FAQ = [
   },
 ];
 
+/* Left-edge section dots (desktop): server-rendered links, active state set by the Polish module */
+const DOTS = [
+  { href: "#top", label: "Hero" },
+  { href: "#routes", label: "Routes" },
+  { href: "#approach", label: "Approach" },
+  { href: "#ways", label: "Ways" },
+  { href: "#principles", label: "Principles" },
+  { href: "#plan", label: "Plan" },
+];
+
+/* Lisbon office, for the hero flight strip */
+const HQ = { code: "LIS", lat: 38.72, lon: -9.14 };
+
 const MAILTO =
   "mailto:kyan775909@gmail.com?subject=" + encodeURIComponent("Terra Trek — route enquiry (concept site)");
 
@@ -116,12 +130,39 @@ export default function Home() {
             <MobileMenu links={NAV} cta={{ href: "#plan", label: "Plan a route" }} />
           </div>
         </div>
+        <div className="progress" aria-hidden="true">
+          <span data-progress />
+        </div>
       </header>
+
+      <nav className="section-dots" aria-label="Jump to section">
+        <ol>
+          {DOTS.map((d) => (
+            <li key={d.href}>
+              <a href={d.href} aria-label={`Go to ${d.label}`} data-dot={d.href.slice(1)}>
+                <span className="mono" aria-hidden="true">
+                  {d.label}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
 
       <div className="stage-layer" aria-hidden="true">
         <GlobePoster />
+        {/* paper backdrop: fades in as the globe unrolls into the printed map (opacity set by ScrollDirector) */}
+        <div className="stage-paper" data-stage-paper />
         <StageLoader />
+        {/* loader curtain: behind the text (never the LCP), lifts when the 3D is ready */}
+        <div className="stage-curtain">
+          <span className="curtain-horizon" />
+          <span className="curtain-label mono">Acquiring route…</span>
+        </div>
       </div>
+      <noscript>
+        <style>{`.stage-curtain{display:none}`}</style>
+      </noscript>
       <ScrollDirector />
 
       <main id="main" tabIndex={-1}>
@@ -129,15 +170,23 @@ export default function Home() {
           {/* ---------------------------------------------------------- hero */}
           <section className="hero" id="top" aria-labelledby="hero-title">
             <div className="shell hero-inner">
-              <p className="eyebrow">Terra Trek · Slow routes since 2014 · Lisbon</p>
+              <p className="eyebrow fade-up">Terra Trek · Slow routes since 2014 · Lisbon</p>
+              {/* CSS-only line reveal: transform only, so the headline (the LCP) paints on the first frame */}
               <h1 id="hero-title" className="display hero-title">
-                Travel the <em>long way</em> round.
+                <span className="line">
+                  <span>Travel the</span>
+                </span>{" "}
+                <span className="line">
+                  <span>
+                    <em>long way</em> round.
+                  </span>
+                </span>
               </h1>
-              <p className="lede">
+              <p className="lede fade-up">
                 We design small-group and private journeys that link a few extraordinary places with fewer flights,
                 longer stays and local people who know every back road. Scroll down and fly our signature route.
               </p>
-              <div className="cta-row">
+              <div className="cta-row fade-up">
                 <a className="btn btn-ember" href="#routes">
                   Fly the route <Arrow />
                 </a>
@@ -145,6 +194,9 @@ export default function Home() {
                   Plan a journey
                 </a>
               </div>
+            </div>
+            {/* boarding-pass strip pinned to the bottom of the hero */}
+            <div className="shell hero-foot fade-up">
               <dl className="stats">
                 {STATS.map((s) => (
                   <div key={s.label}>
@@ -153,10 +205,15 @@ export default function Home() {
                   </div>
                 ))}
               </dl>
+              <div className="hero-aside">
+                <p className="flight-strip mono">
+                  {HQ.code} {formatCoord(HQ.lat, HQ.lon)} · Next departure {ROUTE[0].code} · 2027 season
+                </p>
+                <p className="scroll-cue" aria-hidden="true">
+                  Scroll to take off
+                </p>
+              </div>
             </div>
-            <p className="scroll-cue" aria-hidden="true">
-              Scroll to take off
-            </p>
           </section>
 
           {/* -------------------------------------------------------- routes */}
@@ -235,7 +292,19 @@ export default function Home() {
               </ol>
             </div>
 
-            <div className="stop-end" data-stop-end>
+            {/* outro: the camera pulls back over the whole route, then the globe starts to unroll */}
+            <div className="stop-end" data-stop-end aria-hidden="true" />
+
+            {/* the unroll: the globe peels open into the printed route map */}
+            <div className="stop-unroll" data-stop-unroll>
+              <p className="sr-only">The globe unrolls into a flat map of the full route.</p>
+              <figure
+                className="flat-map"
+                role="img"
+                aria-label={`Flat map of the Long Way Round: ${ROUTE.map((c) => c.city).join(", ")}.`}
+              >
+                <FlatMap />
+              </figure>
               <div className="shell">
                 <div className="outro-panel">
                   <p className="display">
@@ -290,7 +359,7 @@ export default function Home() {
                 const planId = `plan-${p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
                 return (
                 <article key={p.name} className={p.featured ? "plan plan-feature" : "plan"} aria-labelledby={planId}>
-                  {p.featured ? <span className="plan-badge">Most booked</span> : null}
+                  {p.featured ? <span className="plan-badge mono">Most booked</span> : null}
                   <p className="plan-kind">{p.kind}</p>
                   <h3 id={planId}>{p.name}</h3>
                   <p className="plan-price">
@@ -316,7 +385,7 @@ export default function Home() {
         </section>
 
         {/* -------------------------------------------------------- principles */}
-        <section className="principles section" aria-labelledby="principles-title">
+        <section className="principles section" id="principles" aria-labelledby="principles-title">
           <div className="shell">
             <div className="section-head">
               <p className="eyebrow">Field principles</p>

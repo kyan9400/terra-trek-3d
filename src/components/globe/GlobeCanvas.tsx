@@ -2,19 +2,20 @@
 
 /* ==========================================================================
    GLOBE CANVAS — React Three Fiber host for GlobeScene.
-   - frameloop "demand": a frame only renders when invalidate() is called.
-     The loop switches to "always" only while something animates on its own
-     (full motion + stage on screen + tab visible).
-   - DPR starts at the tier cap; PerformanceMonitor (only mounted while the
-     loop runs, so idle frames are not mistaken for slow ones) lowers it on
-     decline and raises it again on incline.
+   - frameloop "demand" always: a frame only renders when invalidate() is called.
+     While something animates on its own (full motion + stage on screen + tab
+     visible) an ambient ticker asks for ~30 fps, or every frame for 1.5 s after
+     scroll, pointer or intro activity (stage.wake). Off stage: 0 frames.
+   - DPR starts at the tier cap; PerformanceMonitor (only mounted during the
+     full-rate "hot" phases, so the 30 fps idle is not read as a decline)
+     lowers it on decline and raises it again on incline.
    - The scene is built in slices (yielding between heavy steps), then its
      shaders are compiled with compileAsync before the canvas fades in.
    ========================================================================== */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { PerformanceMonitor } from "@react-three/drei";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type * as THREE from "three";
 import { TIERS, type Tier, type TierSettings } from "@/lib/quality";
 import { isReducedMotion, subscribeMotion } from "@/lib/motion";
@@ -38,14 +39,16 @@ function useLooping() {
   return useSyncExternalStore(subscribeLoop, loopSnapshot, loopServerSnapshot);
 }
 
-type WorldProps = { settings: TierSettings; looping: boolean; onReady: () => void };
+type WorldProps = { settings: TierSettings; looping: boolean; onReady: () => void; onHot: (hot: boolean) => void };
 
-function World({ settings, looping, onReady }: WorldProps) {
+/** Idle frame spacing for the ambient ticker (~30 fps) */
+const IDLE_MS = 32;
+
+function World({ settings, looping, onReady, onHot }: WorldProps) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera);
   const invalidate = useThree((s) => s.invalidate);
-  const setFrameloop = useThree((s) => s.setFrameloop);
   const [world, setWorld] = useState<GlobeScene | null>(null);
 
   // Build off the critical path: in slices, never in one long task
@@ -68,10 +71,31 @@ function World({ settings, looping, onReady }: WorldProps) {
     };
   }, [scene, settings]);
 
+  // Ambient ticker: ~30 fps when idle, every frame while "hot", stopped when not looping
   useEffect(() => {
-    setFrameloop(looping ? "always" : "demand");
     invalidate();
-  }, [looping, setFrameloop, invalidate]);
+    if (!looping) return;
+    let raf = 0;
+    let last = 0;
+    let wasHot = false;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const hot = now < stage.hotUntil;
+      if (hot !== wasHot) {
+        wasHot = hot;
+        onHot(hot);
+      }
+      if (hot || now - last >= IDLE_MS) {
+        last = now;
+        invalidate();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (wasHot) onHot(false);
+    };
+  }, [looping, invalidate, onHot]);
 
   useEffect(() => {
     if (!world) return;
@@ -89,14 +113,24 @@ function World({ settings, looping, onReady }: WorldProps) {
     let cancelled = false;
     const el = gl.domElement;
     world.update(camera as THREE.PerspectiveCamera, el.clientWidth || 1, el.clientHeight || 1, 0, isReducedMotion(), gl.getPixelRatio());
+    // hidden parts (aircraft, pillars…) are compiled too; the next update() hides them again
+    world.showAllForCompile();
     yieldToMain()
       .then(() => (cancelled ? undefined : gl.compileAsync(scene, camera)))
       .catch(() => undefined)
       .then(() => {
         if (cancelled) return;
         invalidate();
-        // two frames: one to render, one to present
-        requestAnimationFrame(() => requestAnimationFrame(() => !cancelled && onReady()));
+        // two frames: one to render, one to present; then the curtain lifts and the "lights on" intro starts
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (cancelled) return;
+            world.startIntro();
+            stage.wake();
+            invalidate();
+            onReady();
+          }),
+        );
       });
     return () => {
       cancelled = true;
@@ -126,6 +160,8 @@ export default function GlobeCanvas({ tier, onReady, onLost }: Props) {
   const floor = Math.min(1, cap) * 0.75;
   const [dpr, setDpr] = useState(cap);
   const looping = useLooping();
+  const [hot, setHot] = useState(false);
+  const onHot = useCallback((h: boolean) => setHot(h), []);
 
   return (
     <Canvas
@@ -143,7 +179,7 @@ export default function GlobeCanvas({ tier, onReady, onLost }: Props) {
         });
       }}
     >
-      {looping && (
+      {looping && hot && (
         <PerformanceMonitor
           flipflops={3}
           onDecline={() => setDpr((d) => Math.max(floor, Math.round((d - 0.25) * 100) / 100))}
@@ -151,7 +187,7 @@ export default function GlobeCanvas({ tier, onReady, onLost }: Props) {
           onFallback={() => setDpr(floor)}
         />
       )}
-      <World settings={settings} looping={looping} onReady={onReady} />
+      <World settings={settings} looping={looping} onReady={onReady} onHot={onHot} />
     </Canvas>
   );
 }

@@ -32,6 +32,13 @@ export default function GlobeStage({ probe }: { probe: Probe }) {
     document.documentElement.dataset.globe = state;
   }, [state]);
 
+  // Safety net: if the 3D is still not ready after 12 s, drop the loader curtain so the poster shows
+  useEffect(() => {
+    if (state !== "loading") return;
+    const t = window.setTimeout(() => document.documentElement.setAttribute("data-curtain", "off"), 12000);
+    return () => window.clearTimeout(t);
+  }, [state]);
+
   const onReady = useCallback(() => setState("ready"), []);
   const onLost = useCallback(() => setState("failed"), []);
 

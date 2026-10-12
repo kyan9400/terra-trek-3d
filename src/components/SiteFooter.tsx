@@ -6,13 +6,13 @@ export default function SiteFooter() {
       <div className="shell footer-grid">
         <div>
           <p className="footer-brand">
-            <span style={{ color: "var(--ember)", verticalAlign: "-6px", marginRight: 8, display: "inline-block" }}>
+            <span className="footer-logo">
               <Logo />
             </span>
             Terra Trek
           </p>
-          <p style={{ marginTop: 8 }}>Slow routes across a fast world.</p>
-          <p style={{ marginTop: 8 }}>Concept project — fictional brand.</p>
+          <p className="footer-line">Slow routes across a fast world.</p>
+          <p className="footer-line">Concept project — fictional brand.</p>
         </div>
         <div>
           <p>Design &amp; development</p>
@@ -22,7 +22,7 @@ export default function SiteFooter() {
         </div>
         <div>
           <p>© 2026 Alhassan Alfarran</p>
-          <p style={{ marginTop: 8 }}>Globe, arcs and illustrations drawn in code. Typefaces under the SIL Open Font License.</p>
+          <p className="footer-line">Globe, arcs and illustrations drawn in code. Typefaces under the SIL Open Font License.</p>
         </div>
       </div>
     </footer>

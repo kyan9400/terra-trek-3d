@@ -12,18 +12,32 @@ export type Tier = "low" | "medium" | "high";
 
 export type TierSettings = {
   dprCap: number;
-  antialias: boolean;
+  antialias: boolean; // MSAA; land dots then use alpha-to-coverage, otherwise discard
   landSamples: number; // Fibonacci samples on the sphere; ~29% become land dots
   stars: number;
   twinkle: boolean;
   ambientArcs: boolean;
-  cityLights: boolean;
+  cityLights: boolean; // metro light clusters on the night side
+  flicker: boolean; // city lights shimmer very slightly
+  oceanSeg: [number, number]; // ocean sphere width × height segments
+  oceanNoise: 0 | 1 | 2; // value-noise octaves that break the sun glint into glitter
+  pillars: boolean; // light pillars above the markers
+  aircraftMesh: boolean; // tiny chevron plane (else the glow point only)
 };
 
 export const TIERS: Record<Tier, TierSettings> = {
-  high: { dprCap: 2, antialias: true, landSamples: 60000, stars: 2400, twinkle: true, ambientArcs: true, cityLights: true },
-  medium: { dprCap: 1.5, antialias: true, landSamples: 36000, stars: 1200, twinkle: false, ambientArcs: true, cityLights: true },
-  low: { dprCap: 1, antialias: false, landSamples: 20000, stars: 500, twinkle: false, ambientArcs: false, cityLights: false },
+  high: {
+    dprCap: 2, antialias: true, landSamples: 60000, stars: 2400, twinkle: true, ambientArcs: true, cityLights: true,
+    flicker: true, oceanSeg: [160, 112], oceanNoise: 2, pillars: true, aircraftMesh: true,
+  },
+  medium: {
+    dprCap: 1.5, antialias: true, landSamples: 36000, stars: 1200, twinkle: false, ambientArcs: true, cityLights: true,
+    flicker: false, oceanSeg: [128, 96], oceanNoise: 1, pillars: true, aircraftMesh: true,
+  },
+  low: {
+    dprCap: 1, antialias: false, landSamples: 20000, stars: 500, twinkle: false, ambientArcs: false, cityLights: false,
+    flicker: false, oceanSeg: [96, 64], oceanNoise: 0, pillars: true, aircraftMesh: false,
+  },
 };
 
 const isTier = (v: string | null): v is Tier => v === "low" || v === "medium" || v === "high";

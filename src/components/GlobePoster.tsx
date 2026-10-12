@@ -1,6 +1,7 @@
 /* ==========================================================================
    GLOBE POSTER — a server-rendered SVG of the same globe, used as
-   (a) the first paint while the 3D warms up, and
+   (a) the stage behind the loader curtain while the 3D warms up
+       (seen directly with reduced motion or without JS), and
    (b) the permanent fallback without WebGL or after a lost context.
    Dots come from the same land mask as the 3D globe, projected
    orthographically at build time, so the poster and the canvas match.

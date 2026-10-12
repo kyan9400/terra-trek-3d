@@ -5,7 +5,9 @@
    Then a tiny GPU probe (no three.js) decides whether the 3D is worth it at all:
    without WebGL2, or on a software renderer (SwiftShader, llvmpipe, …), the
    3D chunk is never requested and the server-rendered poster stays.
-   ?quality=low|medium|high forces the 3D on. */
+   ?quality=low|medium|high forces the 3D on.
+   The same trigger also imports the Polish module (dots, reveals, cursor…)
+   on its own, so poster-only devices get the 2D extras too. */
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
@@ -25,7 +27,14 @@ export default function StageLoader() {
     const w = window as IdleWindow;
     let idleId = 0;
     let timer = 0;
+    let alive = true;
+    let stopPolish: (() => void) | null = null;
     const start = () => {
+      void import("./Polish")
+        .then((m) => {
+          if (alive) stopPolish = m.startPolish();
+        })
+        .catch(() => undefined);
       const result = probeQuality();
       if (!result.webgl) {
         document.documentElement.dataset.globe = "failed";
@@ -42,6 +51,8 @@ export default function StageLoader() {
     if (document.readyState === "complete") schedule();
     else window.addEventListener("load", schedule, { once: true });
     return () => {
+      alive = false;
+      stopPolish?.();
       window.removeEventListener("load", schedule);
       if (idleId && w.cancelIdleCallback) w.cancelIdleCallback(idleId);
       window.clearTimeout(timer);

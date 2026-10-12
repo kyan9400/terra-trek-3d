@@ -58,8 +58,8 @@
   --t-xl: 1.75rem;
   --t-2xl: clamp(2rem, 1.4rem + 2.6vw, 2.5rem);
   --t-3xl: clamp(2.5rem, 1.6rem + 3.6vw, 3.5rem);
-  --t-4xl: clamp(3rem, 1.6rem + 6vw, 5rem);
-  --t-5xl: clamp(3.4rem, 1.2rem + 8.6vw, 7rem);
+  --t-4xl: clamp(3rem, 1.6rem + 6vw, 5.5rem);
+  --t-5xl: clamp(3.4rem, 1rem + 9.4vw, 8.5rem);
 
   --gutter: var(--s-4);
   --header-h: 64px;
@@ -105,6 +105,15 @@ body {
   overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
 }
 
 ::selection {
@@ -191,15 +200,17 @@ body {
   font-size: var(--t-base);
   line-height: 1;
   white-space: nowrap;
+  /* --mx / --my: magnetic offset written by the Polish module (fine pointers, full motion) */
+  transform: translate(var(--mx, 0px), var(--my, 0px));
   transition:
     transform 0.25s ease,
     opacity 0.25s ease;
 }
 .btn:hover {
-  transform: translateY(-2px);
+  transform: translate(var(--mx, 0px), calc(var(--my, 0px) - 2px));
 }
 .btn:active {
-  transform: translateY(0);
+  transform: translate(var(--mx, 0px), var(--my, 0px));
 }
 .btn-ember {
   background: var(--ember);
@@ -233,6 +244,16 @@ body {
   text-transform: uppercase;
   color: var(--ember);
 }
+/* ember hairline before every eyebrow */
+.eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  margin-right: var(--s-3);
+  vertical-align: 0.3em;
+  background: currentColor;
+}
 .paper .eyebrow {
   color: var(--rust);
 }
@@ -245,6 +266,22 @@ body {
   height: var(--header-h);
   background: rgba(10, 15, 28, 0.94);
   border-bottom: 1px solid rgba(36, 52, 77, 0.7);
+}
+/* scroll progress: 2 px ember bar under the header, scaled in ScrollDirector */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  pointer-events: none;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--ember);
+  transform-origin: left center;
+  transform: scaleX(0);
 }
 .header-inner {
   height: 100%;
@@ -318,6 +355,38 @@ body {
 }
 .motion-toggle:hover {
   color: var(--sand);
+}
+/* mini switch that shows the aria-pressed state */
+.motion-switch {
+  display: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.motion-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  transition: transform 0.2s ease;
+}
+.motion-toggle[aria-pressed="true"] .motion-switch {
+  color: var(--ember);
+}
+.motion-toggle[aria-pressed="true"] .motion-switch::after {
+  transform: translateX(12px);
+}
+@media (min-width: 640px) {
+  .motion-switch {
+    display: inline-block;
+  }
 }
 .motion-toggle__text {
   position: absolute;
@@ -490,8 +559,9 @@ main:focus {
   position: relative;
   min-height: 100svh;
   display: flex;
-  align-items: flex-end;
-  padding: calc(var(--header-h) + var(--s-7)) 0 var(--s-7);
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: calc(var(--header-h) + var(--s-7)) 0 var(--s-6);
 }
 .hero::before {
   content: "";
@@ -510,9 +580,53 @@ main:focus {
 }
 .hero-title {
   font-size: var(--t-5xl);
-  line-height: 0.95;
+  line-height: 0.9;
+  letter-spacing: -0.025em;
   margin-top: var(--s-4);
-  max-width: 11ch;
+  max-width: 10ch;
+}
+/* split-line reveal: each line rises inside its own clip; transform only, never opacity,
+   so most of the headline (the LCP) is painted on the first frame */
+.hero-title .line {
+  display: block;
+  overflow-x: visible;
+  overflow-y: clip;
+  padding-block: 0.16em;
+  margin-block: -0.16em;
+}
+.hero-title .line > span {
+  display: block;
+  animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+.hero-title .line + .line > span {
+  animation-delay: 0.08s;
+}
+@keyframes rise {
+  from {
+    transform: translateY(45%);
+  }
+}
+/* supporting hero copy (not the LCP) */
+.fade-up {
+  animation: fade-up 0.8s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+.eyebrow.fade-up {
+  animation-delay: 0.15s;
+}
+.lede.fade-up {
+  animation-delay: 0.22s;
+}
+.cta-row.fade-up {
+  animation-delay: 0.3s;
+}
+.hero-foot.fade-up {
+  animation-delay: 0.35s;
+}
+@keyframes fade-up {
+  from {
+    opacity: 0.001;
+    transform: translateY(12px);
+  }
 }
 .lede {
   margin-top: var(--s-5);
@@ -526,42 +640,74 @@ main:focus {
   gap: var(--s-3);
   margin-top: var(--s-6);
 }
+
+/* boarding-pass strip at the foot of the hero */
+.hero-foot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin-top: var(--s-7);
+}
 .stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s-5) var(--s-4);
-  margin-top: var(--s-7);
-  max-width: 40rem;
-  border-top: 1px solid var(--line);
-  padding-top: var(--s-5);
-}
-.stats dt {
-  font-size: var(--t-xs);
-  color: var(--mist);
-  line-height: 1.4;
-}
-.stats dd {
-  font-family: var(--font-serif);
-  font-size: var(--t-xl);
-  line-height: 1;
-  color: var(--sand);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .stats div {
   display: flex;
-  flex-direction: column-reverse;
-  gap: var(--s-2);
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  background: var(--night);
+}
+.stats dt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mist);
+  line-height: 1.45;
+}
+.stats dd {
+  font-family: var(--font-serif);
+  font-size: var(--t-2xl);
+  line-height: 1;
+  color: var(--sand);
+}
+.stats dd,
+.facts dd,
+.plan-price strong {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.hero-aside {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+.flight-strip {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mist);
+  line-height: 1.5;
 }
 .scroll-cue {
-  position: absolute;
-  right: var(--gutter);
-  bottom: var(--s-6);
   font-size: var(--t-xs);
   color: var(--mist);
   display: none;
+  flex-direction: column;
   align-items: center;
   gap: var(--s-2);
   letter-spacing: 0.16em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .scroll-cue::after {
   content: "";
@@ -572,18 +718,43 @@ main:focus {
 
 @media (min-width: 960px) and (min-aspect-ratio: 11/10) {
   .hero {
-    align-items: center;
+    justify-content: space-between;
+  }
+  .hero-inner {
+    margin-block: auto;
   }
   .hero::before {
     inset: 0 auto 0 0;
-    width: 55%;
-    background: linear-gradient(to right, rgba(10, 15, 28, 0.85), rgba(10, 15, 28, 0));
+    width: 58%;
+    background: linear-gradient(to right, rgba(10, 15, 28, 0.88), rgba(10, 15, 28, 0));
   }
+  /* text owns columns 1–6 of the 12-column shell; the globe owns the rest */
   .hero-inner > * {
-    max-width: 40rem;
+    max-width: min(40rem, 50%);
+  }
+  .hero-inner > .hero-title {
+    max-width: 10ch;
+  }
+  .hero-foot {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--s-6);
   }
   .stats {
+    flex: 0 1 46rem;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .stats dt {
+    font-size: 12px;
+  }
+  .hero-aside {
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+  .flight-strip {
+    max-width: 22rem;
   }
   .scroll-cue {
     display: flex;
@@ -654,7 +825,7 @@ main:focus {
   mask:
     radial-gradient(circle var(--notch) at 0 calc(100% - var(--stub)), #0000 98%, #000) left / 51% 100% no-repeat,
     radial-gradient(circle var(--notch) at 100% calc(100% - var(--stub)), #0000 98%, #000) right / 51% 100% no-repeat;
-  opacity: 0.86;
+  opacity: 0.92;
   transform: translateY(16px) scale(0.98);
   transform-origin: left center;
   transition:
@@ -851,6 +1022,69 @@ main:focus {
   }
 }
 
+/* ------------------------------------------------------------ unroll: globe → printed map */
+/* paper backdrop behind the canvas; opacity follows the unroll (ScrollDirector) */
+.stage-paper {
+  position: absolute;
+  inset: 0;
+  background: var(--sand);
+  opacity: 0;
+  pointer-events: none;
+}
+.stop-unroll {
+  position: relative;
+  min-height: 160svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--s-8);
+  padding: calc(var(--header-h) + var(--s-6)) 0 var(--s-7);
+}
+/* server-rendered map for visitors without the 3D; the 3D unroll replaces it */
+.flat-map {
+  position: sticky;
+  top: calc(var(--header-h) + var(--s-6));
+  width: min(100% - 2 * var(--gutter), 1040px);
+  margin: 0 auto;
+  border-radius: 4px;
+  box-shadow: 0 24px 48px -32px rgba(26, 23, 18, 0.45);
+}
+.flat-map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.flat-map__code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  fill: var(--ink);
+}
+html[data-globe="ready"] .flat-map {
+  visibility: hidden;
+}
+/* the outro panel now sits on the printed map: a paper ticket */
+.stop-unroll .outro-panel {
+  position: relative;
+  background: var(--sand);
+  color: var(--ink);
+  box-shadow:
+    0 0 0 1px rgba(26, 23, 18, 0.14),
+    0 30px 60px -36px rgba(26, 23, 18, 0.55);
+}
+.stop-unroll .outro-panel .display em {
+  color: var(--rust);
+}
+.stop-unroll .outro-panel p:not(.display) {
+  color: var(--ink-2);
+}
+.stop-unroll .text-link {
+  color: var(--rust);
+}
+.stop-unroll :focus-visible {
+  outline-color: var(--rust);
+}
+
 /* ------------------------------------------------------------ paper sections */
 .paper {
   position: relative;
@@ -981,22 +1215,33 @@ main:focus {
   padding: var(--s-6) var(--s-5);
   box-shadow: 0 1px 0 rgba(26, 23, 18, 0.08);
 }
+.plan {
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.1, 1);
+}
+.plan:hover {
+  transform: translateY(-4px);
+}
 .plan-feature {
   background: var(--night);
   color: var(--sand);
+  box-shadow: 0 0 0 1px var(--ember);
 }
+/* rubber-stamp badge */
 .plan-badge {
   position: absolute;
   top: var(--s-5);
   right: var(--s-5);
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: var(--ember);
-  color: var(--night);
-  padding: var(--s-1) var(--s-2);
-  border-radius: 6px;
+  color: var(--ember);
+  padding: 5px 9px;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1.5px var(--ember),
+    inset 0 0 0 3.5px var(--night),
+    inset 0 0 0 4.5px rgba(255, 159, 67, 0.6);
+  transform: rotate(-7deg);
 }
 .plan-kind {
   font-family: var(--font-mono);
@@ -1145,10 +1390,16 @@ main:focus {
   box-shadow: inset 0 0 0 1.5px currentColor;
   font-family: var(--font-mono);
   font-weight: 400;
-  transition: transform 0.25s ease;
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.7, 0.1, 1),
+    background-color 0.25s ease,
+    color 0.25s ease;
 }
+/* + turns into × */
 .faq details[open] summary::after {
-  transform: rotate(45deg);
+  transform: rotate(135deg);
+  background-color: var(--ink);
+  color: var(--sand);
 }
 .faq details p {
   padding: 0 0 var(--s-5);
@@ -1215,6 +1466,15 @@ main:focus {
   font-size: var(--t-xl);
   color: var(--sand);
 }
+.footer-logo {
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: -6px;
+  color: var(--ember);
+}
+.footer-line {
+  margin-top: 8px;
+}
 @media (min-width: 900px) {
   .footer-grid {
     grid-template-columns: 1.2fr 1fr 1fr;
@@ -1255,8 +1515,14 @@ main:focus {
 .reduce-motion .card {
   transform: none;
 }
-.reduce-motion .btn:hover {
+.reduce-motion .btn,
+.reduce-motion .btn:hover,
+.reduce-motion .plan:hover {
   transform: none;
+}
+.reduce-motion .fade-up,
+.reduce-motion .hero-title .line > span {
+  animation: none;
 }
 
 .section-head h2 em {
@@ -1265,4 +1531,266 @@ main:focus {
 }
 .paper .section-head h2 em {
   color: var(--rust);
+}
+
+/* ------------------------------------------------------------ section dots (desktop, fine pointer) */
+.section-dots {
+  display: none;
+}
+@media (min-width: 960px) and (hover: hover) and (pointer: fine) {
+  .section-dots {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: 50%;
+    z-index: 40;
+    transform: translateY(-50%);
+  }
+  .section-dots ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .section-dots a {
+    position: relative;
+    display: block;
+    width: 44px;
+    height: 44px;
+  }
+  /* idle dot and the active pill (scaled in from the left) */
+  .section-dots a::before,
+  .section-dots a::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 19px;
+    height: 6px;
+    border-radius: 999px;
+    transition:
+      transform 0.35s cubic-bezier(0.2, 0.7, 0.1, 1),
+      opacity 0.25s ease;
+  }
+  .section-dots a::before {
+    width: 6px;
+    background: var(--mist);
+    box-shadow: 0 0 0 1.5px rgba(10, 15, 28, 0.55);
+  }
+  .section-dots a::after {
+    width: 20px;
+    background: var(--ember);
+    box-shadow: 0 0 0 1.5px rgba(10, 15, 28, 0.55);
+    transform-origin: left center;
+    transform: scaleX(0.3);
+    opacity: 0;
+  }
+  .section-dots a[aria-current="true"]::before {
+    opacity: 0;
+  }
+  .section-dots a[aria-current="true"]::after {
+    transform: none;
+    opacity: 1;
+  }
+  .section-dots a:hover::before {
+    transform: scale(1.4);
+  }
+  /* mono label slides out on hover / focus (and for the active dot on very wide screens) */
+  .section-dots span {
+    position: absolute;
+    left: 44px;
+    top: 50%;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--night);
+    color: var(--sand);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translate(-6px, -50%);
+    transition:
+      transform 0.3s cubic-bezier(0.2, 0.7, 0.1, 1),
+      opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .section-dots a:hover span,
+  .section-dots a:focus-visible span {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+@media (min-width: 1500px) and (hover: hover) and (pointer: fine) {
+  .section-dots a[aria-current="true"] span {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+
+/* ------------------------------------------------------------ night → paper: perforated edge */
+#approach::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -13px;
+  height: 14px;
+  background: var(--sand);
+  -webkit-mask: radial-gradient(circle 5px at 9px 0, #0000 96%, #000) 0 0 / 18px 100% repeat-x;
+  mask: radial-gradient(circle 5px at 9px 0, #0000 96%, #000) 0 0 / 18px 100% repeat-x;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------ scroll reveals (only once Polish ran) */
+.has-reveal [data-reveal] {
+  transition:
+    opacity 0.8s cubic-bezier(0.2, 0.7, 0.1, 1) calc(var(--i, 0) * 70ms),
+    transform 0.8s cubic-bezier(0.2, 0.7, 0.1, 1) calc(var(--i, 0) * 70ms);
+}
+.has-reveal [data-reveal]:not([data-in]) {
+  opacity: 0;
+  transform: translateY(24px);
+}
+.reduce-motion.has-reveal [data-reveal] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ------------------------------------------------------------ desktop cursor */
+.cursor-dot,
+.cursor-ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.cursor-on .cursor-dot,
+.cursor-on .cursor-ring {
+  opacity: 1;
+}
+.cursor-dot {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--ember);
+  box-shadow: 0 0 0 1.5px rgba(10, 15, 28, 0.5);
+}
+.cursor-ring {
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  display: grid;
+  place-items: center;
+}
+.cursor-ring__shape {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--ember);
+  box-shadow: 0 0 0 1px rgba(10, 15, 28, 0.35);
+  transform: scale(0.643); /* 36 px */
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.7, 0.1, 1),
+    background-color 0.3s ease;
+}
+.cursor-ring[data-link] .cursor-ring__shape {
+  transform: scale(0.42);
+}
+.cursor-ring__label {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ember);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+html[data-globe-hover] .cursor-ring__shape {
+  transform: none;
+  background-color: rgba(255, 159, 67, 0.14);
+}
+html[data-globe-hover] .cursor-ring__label {
+  opacity: 1;
+}
+html[data-globe-hover] .cursor-dot {
+  opacity: 0;
+}
+/* the custom cursor replaces the native one, except on text fields */
+.has-cursor.cursor-on,
+.has-cursor.cursor-on * {
+  cursor: none;
+}
+.has-cursor.cursor-on :is(input, textarea, select, [contenteditable="true"]) {
+  cursor: auto;
+}
+.reduce-motion .cursor-dot,
+.reduce-motion .cursor-ring {
+  display: none;
+}
+
+/* ------------------------------------------------------------ stage loader curtain */
+.stage-curtain {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 60% at 70% 45%, rgba(20, 52, 82, 0.4), transparent 70%),
+    var(--night);
+  transition: transform 0.9s cubic-bezier(0.7, 0, 0.2, 1);
+}
+.curtain-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 33%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ember) 50%, transparent);
+  transform-origin: 50% 50%;
+  animation: horizon 1.4s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+.curtain-label {
+  position: absolute;
+  left: 50%;
+  top: calc(33% + 14px);
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mist);
+  white-space: nowrap;
+}
+@keyframes horizon {
+  from {
+    transform: scaleX(0);
+  }
+}
+@media (min-width: 960px) and (min-aspect-ratio: 11/10) {
+  .curtain-horizon {
+    top: 50%;
+    left: 40%;
+  }
+  .curtain-label {
+    left: 70%;
+    top: calc(50% + 14px);
+  }
+}
+html[data-globe="ready"] .stage-curtain {
+  transform: translateY(-100%);
+}
+html[data-globe="off"] .stage-curtain,
+html[data-globe="failed"] .stage-curtain,
+html[data-curtain="off"] .stage-curtain,
+.reduce-motion .stage-curtain {
+  display: none;
+}
+
+/* globe drag in the hero (desktop) */
+html[data-globe-drag],
+html[data-globe-drag] * {
+  user-select: none;
+  cursor: grabbing;
 }

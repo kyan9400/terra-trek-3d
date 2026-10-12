@@ -7,6 +7,7 @@ There are **no downloaded images, 3D models, HDRIs, textures or audio files**, a
 third-party CDNs.
 
 Continent outlines are hand-plotted longitude/latitude polygons (geographic facts, deliberately coarse).
+Terrain heights and metro positions: hand-placed coordinates (geographic facts).
 City coordinates and airport codes are public geographic facts. Terra Trek and all prices, statistics and
 itineraries are fictional.
 
