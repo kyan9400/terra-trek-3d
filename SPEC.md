@@ -112,8 +112,12 @@ parallax, no intro, no loader curtain, no 2D reveals / magnetic buttons / custom
 whose card is closest to the viewport centre instead of flying; passed arcs are drawn complete; the globe cuts to the
 flat map past `p = 6.5`.
 
-**No WebGL / context lost.** A code-made SVG poster (globe disc, dotted land, dotted route, pins) is rendered by the
-server behind the canvas; it stays if WebGL is missing, the renderer is software-only, or the context is lost. The
+**No WebGL / context lost.** A code-made SVG poster is rendered by the server behind the canvas: a simplified version
+of the realistic hero Earth, projected at build time in perspective from the hero camera (distance 4.3, 20° N 16° W) and
+sized in CSS to match the 3D globe it cross-fades into (phones `min(98.6vw, 71lvh)`, wider screens `94lvh`). Solid land
+from the same polygons as the 3D mask, climate tints from the shared `climate.ts` table (deserts, wet forest, tundra,
+ice), deep blue ocean with a shelf glow, a few cloud banks, a blurred night side with a dusk rim on the left, blue
+atmosphere rim, route arcs and pins (~26 KB of the HTML, 37 KB gzipped page). It stays if WebGL is missing, the renderer is software-only, or the context is lost. The
 unroll block also carries a server-rendered SVG of the flat route map (same projection, halftone land rows, rust route,
 labelled pins; `role="img"` with a label), so every visitor ends on the printed map. The page is fully usable without 3D.
 
@@ -281,7 +285,9 @@ Zero downloaded images, models, HDRIs or audio. No runtime CDN requests.
 - No per-frame allocations, no React state per frame; card highlighting updates the DOM only when the index changes.
 - Fonts: 3 families, `display: swap`, mono not preloaded.
 - LCP element is the hero heading (server-rendered HTML, painted on the first frame; its reveal is transform-only);
-  the canvas is revealed after shader warm-up. The poster SVG uses integer coordinates to keep the HTML small.
+  the canvas is revealed after shader warm-up. The poster SVG uses integer relative coordinates and a single shared land path (`<use>`) to keep the HTML small.
+- Phones / narrow screens: the hero scrim starts under the globe (42 svh) instead of over it, with a soft shade behind
+  the headline column, so the globe reads bright while the copy stays legible; desktop is unchanged.
 - Security headers: `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` (no CSP: the inline motion
   script would need a nonce, which forces dynamic rendering).
 - PageSpeed mobile: Performance ≥ 95 (LCP < 2.5 s, CLS 0), Accessibility / Best Practices / SEO 100.

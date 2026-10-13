@@ -509,11 +509,14 @@ p {
 html[data-stage-off] .stage-layer {
   visibility: hidden;
 }
+/* Sized so the poster globe (radius 250 of 600) matches the 3D hero globe it cross-fades into:
+   phones (aspect < 0.85) frame the globe at ~0.41 of the viewport width, wider screens at ~0.39 of its height. */
 .globe-poster {
   position: absolute;
   left: 50%;
   top: 33%;
-  width: min(118vw, 74svh);
+  width: min(98.6vw, 71vh);
+  width: min(98.6vw, 71lvh);
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   transition: opacity 0.9s ease;
@@ -538,11 +541,16 @@ html[data-globe-hover] body {
   cursor: pointer;
 }
 
+@media (min-aspect-ratio: 85/100) {
+  .globe-poster {
+    width: 94vh;
+    width: 94lvh;
+  }
+}
 @media (min-width: 960px) and (min-aspect-ratio: 11/10) {
   .globe-poster {
     left: 70%;
     top: 50%;
-    width: 90svh;
   }
 }
 
@@ -569,6 +577,17 @@ main:focus {
   inset: 12% 0 0 0;
   background: linear-gradient(to bottom, rgba(10, 15, 28, 0), rgba(10, 15, 28, 0.82) 22%, rgba(10, 15, 28, 0.95) 50%);
   pointer-events: none;
+}
+/* Phones and narrow screens: the globe sits above and behind the headline. Keep it bright (no scrim over
+   the globe itself); a soft shade behind the headline column and the text shadow keep the copy legible,
+   and the scrim only starts under the globe, behind the lede and the stats. */
+@media (max-width: 959.98px), (max-aspect-ratio: 11/10) {
+  .hero::before {
+    inset: 0;
+    background:
+      radial-gradient(ellipse 62% 22% at 18% 31svh, rgba(10, 15, 28, 0.5), transparent 75%),
+      linear-gradient(to bottom, rgba(10, 15, 28, 0) 42svh, rgba(10, 15, 28, 0.74) 57svh, rgba(10, 15, 28, 0.95) 74svh);
+  }
 }
 .hero-inner {
   position: relative;
