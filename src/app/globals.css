@@ -1814,3 +1814,13 @@ html[data-globe-drag] * {
   user-select: none;
   cursor: grabbing;
 }
+
+/* Phones: the globe's bright limb crosses the hero eyebrow, so give it a night pill to stay readable */
+@media (max-width: 640px) {
+  .hero-inner > .eyebrow {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 14px;
+    background: rgba(10, 15, 28, 0.82);
+  }
+}
