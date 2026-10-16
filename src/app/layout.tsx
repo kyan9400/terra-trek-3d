@@ -54,7 +54,7 @@ export const viewport: Viewport = {
 };
 
 // Runs before first paint so CSS and the 3D agree on the motion setting from the start
-const motionScript = `try{var q=new URLSearchParams(location.search).get("motion"),s=null;try{s=localStorage.getItem("terra-trek-motion")}catch(e){}var c=q==="full"||q==="reduced"?q:s,r=c==="full"?false:c==="reduced"?true:matchMedia("(prefers-reduced-motion: reduce)").matches;if(r)document.documentElement.classList.add("reduce-motion")}catch(e){}`;
+const motionScript = `try{var q=new URLSearchParams(location.search).get("motion"),s=null;try{s=localStorage.getItem("terra-trek-motion")}catch(e){}var c=q==="full"||q==="reduced"?q:s,r=c==="reduced";if(r)document.documentElement.classList.add("reduce-motion")}catch(e){}`;
 
 // WebSite structured data only: the brand is fictional, so no agency / offer markup
 const jsonLd = JSON.stringify({

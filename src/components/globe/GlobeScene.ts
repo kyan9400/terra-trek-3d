@@ -1,11 +1,11 @@
 /* ==========================================================================
    GLOBE SCENE — everything on the canvas, built in code.
-     surface    the painted earth (earth.ts textures + value noise): ragged
-                coasts, climate belts (forest, steppe, sand seas with dunes),
-                mountain ridges with relief shading, snow and ice, a turquoise
-                shelf, sun glitter on the water, metro lights at night, haze
-     clouds     a thin shell of drifting procedural weather that parts over
-                the destination on the approach (and shadows the ground, high)
+     surface    the real Earth from NASA imagery (earth-map.ts): Blue Marble
+                colour with an ocean mask, sun glitter on the water, a gentle
+                Black Marble city-light blend on the night side, haze
+     clouds     a thin shell with the NASA Blue Marble cloud map, drifting
+                slowly; it parts over the destination on the approach (and
+                shadows the ground, high tier)
      land dots  instanced SDF dots on a Fibonacci sphere; they only grow in
                 as halftone ink for the printed map
      arcs       camera-facing ribbons along lifted great-circle paths that draw
@@ -26,7 +26,7 @@ import type { TierSettings } from "@/lib/quality";
 import { stage } from "@/lib/stage";
 import { isLand } from "./land";
 import { cityLight, terrainHeight, terrainSlope } from "./terrain";
-import { buildEarth, type EarthTextures } from "./earth";
+import { loadEarthMaps, type EarthMaps } from "./earth-map";
 import { NOISE_TEX_GLSL, makeNoiseTexture } from "./noise";
 import { MAP_H, MAP_LON0, MAP_W, UNROLL_GLSL, mapLon, paperProgress, swingProgress, unrollPoint, unrollProgress } from "./unroll";
 
@@ -73,31 +73,15 @@ function slerpUnit(a: THREE.Vector3, b: THREE.Vector3, t: number, out: THREE.Vec
 /** Value noise from the baked 3D noise texture (noise.ts): small shaders that compile fast. */
 const NOISE_GLSL = NOISE_TEX_GLSL;
 
-/** Clouds: domain-warped value noise on the unit sphere, drifting slowly; cleared around the focused city. */
+/** Clouds: the NASA Blue Marble cloud map (red channel of the earth data map), drifting east; cleared around the focused city. */
 const CLOUD_GLSL = /* glsl */ `
+  uniform sampler2D uData;
   uniform float uCloudTime;
   uniform vec3 uFocus;
   uniform float uClear;
-  float cloudFbm(vec3 p) {
-    float a = 0.5;
-    float s = 0.0;
-    for (int i = 0; i < CLOUD_OCT; i++) {
-      s += a * vnoise(p);
-      p = p * 2.07 + vec3(4.1, 1.3, 7.7);
-      a *= 0.5;
-    }
-    return s;
-  }
-  float cloudCover(vec3 p) {
-    vec3 q = p * 3.4 + vec3(uCloudTime * 0.02, 0.0, uCloudTime * 0.011);
-    vec3 w = vec3(vnoise(q * 1.1), vnoise(q * 1.1 + 5.2), vnoise(q * 1.1 + 9.7)) - 0.5;
-    // stretched along the latitude lines a little: weather moves east-west
-    vec3 r = vec3(q.x, q.y * 1.3, q.z) + w * 0.9;
-    float f = cloudFbm(r * 1.9);
-    float al = abs(p.y);
-    // wet equator, dry subtropics, stormy mid-latitudes
-    float bias = 0.07 * exp(-pow(p.y / 0.12, 2.0)) - 0.09 * exp(-pow((al - 0.42) / 0.12, 2.0)) + 0.06 * smoothstep(0.62, 0.85, al);
-    float c = smoothstep(0.5, 0.74, f + bias);
+  float cloudCover(vec2 tex, vec3 p) {
+    float c = texture2D(uData, tex + vec2(uCloudTime * 0.0004, 0.0)).r;
+    c = smoothstep(0.22, 0.9, c) * 0.62; // a subtle layer: thin haze drops out, thick weather stays translucent
     c *= 1.0 - uClear * (1.0 - smoothstep(0.05, 0.3, distance(p, uFocus)));
     return c;
   }
@@ -141,11 +125,15 @@ const OCEAN_FRAG = /* glsl */ `
   uniform float uPaper;
   uniform float uLights;
   uniform float uIntro;
-  uniform float uBump;
   uniform float uUnroll;
-  uniform float uMaskLod;
-  uniform sampler2D uMask;
-  uniform sampler2D uGeo;
+  uniform sampler2D uSurface;
+  uniform vec2 uMapSize;
+  // hash adapted from "Hash without Sine" by David Hoskins (MIT)
+  float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
   varying vec3 vN;
   varying vec3 vW;
   varying vec3 vP;
@@ -154,28 +142,6 @@ const OCEAN_FRAG = /* glsl */ `
   varying vec2 vTex;
   ${NOISE_GLSL}
   ${CLOUD_GLSL}
-
-  float fbm(vec3 p) {
-    float a = 0.5;
-    float s = 0.0;
-    for (int i = 0; i < SURF_OCT; i++) {
-      s += a * vnoise(p);
-      p = p * 2.03 + vec3(1.7, 9.2, 3.1);
-      a *= 0.5;
-    }
-    return s / (1.0 - pow(0.5, float(SURF_OCT)));
-  }
-  float ridged(vec3 p) {
-    float a = 0.5;
-    float s = 0.0;
-    for (int i = 0; i < SURF_OCT; i++) {
-      float r = 1.0 - abs(vnoise(p) * 2.0 - 1.0);
-      s += a * r * r;
-      p = p * 2.13 + vec3(3.3, 1.1, 5.9);
-      a *= 0.5;
-    }
-    return s;
-  }
 
   float gridLine(float coord, float stepDeg) {
     float x = coord / stepDeg;
@@ -192,90 +158,26 @@ const OCEAN_FRAG = /* glsl */ `
     float lon = vLL.y;
     float alat = abs(lat);
 
-    // ---- what is here: land, height, climate
-    vec4 geo = texture2D(uGeo, vTex);
-    float shelf = texture2D(uGeo, vTex, 3.0).b; // a few mips down: the wide continental shelf
-    float mask = textureLod(uMask, vTex, uMaskLod).r; // softened polygon edges, so noise can rag the coast
+    // ---- what is here: NASA Blue Marble colour, ocean mask (alpha), Black Marble lights (data.g)
+    vec4 surf = texture2D(uSurface, vTex);
+    float land = 1.0 - surf.a;
     float pix = length(fwidth(vP)) + 1e-6; // sphere units per pixel: fine noise only where it can be seen
     float wD = 1.0 - smoothstep(0.12, 0.45, 64.0 * pix);
-    float wE = 1.0 - smoothstep(0.12, 0.45, 190.0 * pix);
-    float nC = fbm(vP * 9.0);           // continental-scale variation
-    float nD = mix(0.5, vnoise(vP * 64.0), wD);  // fine detail
-    float nE = mix(0.5, vnoise(vP * 190.0), wE); // ragged coastlines up close
-    float landF = mix(mask, geo.b, 0.35) + (nC - 0.5) * 0.22 + (nD - 0.5) * 0.2 + (nE - 0.5) * 0.14;
-    float fw = fwidth(landF) + 0.004;
-    float land = smoothstep(0.5 - fw, 0.5 + fw, landF);
-
-    float hBig = geo.r;
-    // mountain ridges: noise plus its gradient by finite differences along east / north
-    // (screen-space derivatives would shade them in 2×2-pixel blocks)
-    float rg = 0.0;
-    vec2 rGrad = vec2(0.0);
     vec3 east = normalize(vec3(cos(radians(lon)), 0.0, -sin(radians(lon))));
     vec3 north = cross(vP, east);
-    if (hBig > 0.004) {
-      float eps = max(pix * 1.5, 0.0004);
-      rg = ridged(vP * 34.0);
-      rGrad = vec2(ridged((vP + east * eps) * 34.0), ridged((vP + north * eps) * 34.0)) - rg;
-      rGrad /= eps;
-    }
-    float arid = clamp(geo.a + (nC - 0.5) * 0.45, 0.0, 1.0);
-    float desert = smoothstep(0.62, 0.82, arid) * (1.0 - smoothstep(0.25, 0.5, hBig));
-    // wind-blown dunes in the sand seas, only where they are big enough on screen (the close approach)
-    float duneArg = dot(vP, vec3(520.0, 200.0, 430.0)) + nD * 6.0 + nC * 9.0;
-    float duneVis = 1.0 - smoothstep(0.2, 0.7, fwidth(duneArg));
-    float dune = (sin(duneArg) * 0.5 + 0.5) * duneVis * smoothstep(0.7, 0.88, arid);
-    // smooth noise only in the bump (the bilinear height texture would facet it); height scales the amplitude
-    float amp = smoothstep(0.0, 0.8, hBig);
-    float H = land * (nC * 0.06 + nD * 0.01 + desert * dune * 0.012);
-
-    // ---- relief: bump the normal with the height field (screen-space derivatives)
+    // the Blue Marble colour already carries shaded relief, so the surface normal stays smooth
     vec3 n = n0;
-    {
-      vec3 dpx = dFdx(vW);
-      vec3 dpy = dFdy(vW);
-      vec3 r1 = cross(dpy, n0);
-      vec3 r2 = cross(n0, dpx);
-      float det = dot(dpx, r1);
-      vec2 dH = vec2(dFdx(H), dFdy(H)) * uBump;
-      vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
-      n = normalize(abs(det) * n0 - grad);
-      // ridges: on the globe east / north are the sphere tangents; they fade out as the map unrolls
-      vec2 rg2 = rGrad * land * amp * 0.6 * uBump * (1.0 - uUnroll) * (1.0 - 0.7 * smoothstep(58.0, 66.0, alat)); // ice sheets are smooth
-      n = normalize(n - east * rg2.x - north * rg2.y);
-    }
 
     float ndl0 = dot(n0, uSun);
-    float ndl = dot(n, uSun);
+    float ndl = ndl0;
     float day = smoothstep(-0.15, 0.3, ndl0);
     // low sun is golden, high sun is white
     vec3 sunCol = mix(vec3(1.0, 0.58, 0.32), vec3(1.0, 0.96, 0.9), smoothstep(0.02, 0.5, ndl0));
 
-    // ---- land colour: climate belts, rock, snow, ice
-    vec3 cForest = vec3(0.06, 0.16, 0.07);
-    vec3 cGreen = vec3(0.2, 0.31, 0.12);
-    vec3 cSteppe = vec3(0.5, 0.44, 0.27);
-    vec3 cSand = mix(vec3(0.6, 0.42, 0.27), vec3(0.87, 0.7, 0.49), smoothstep(0.25, 0.75, nC) * 0.6 + nD * 0.2 + dune * 0.3);
-    vec3 cTundra = vec3(0.34, 0.33, 0.27);
-    vec3 cRock = mix(vec3(0.36, 0.31, 0.26), vec3(0.55, 0.49, 0.42), rg);
-    vec3 cSnow = vec3(0.92, 0.95, 1.0);
-    vec3 lc = mix(cForest, cGreen, smoothstep(0.18, 0.45, arid));
-    lc = mix(lc, cSteppe, smoothstep(0.42, 0.62, arid));
-    lc = mix(lc, cSand, smoothstep(0.6, 0.8, arid));
-    lc = mix(lc, cTundra, smoothstep(55.0, 66.0, alat) * (1.0 - desert));
-    lc *= 0.82 + 0.36 * nC;
-    lc = mix(lc, cRock, smoothstep(0.22, 0.6, hBig * (0.6 + 0.8 * rg)) * 0.85);
-    float snowLine = mix(0.62, 0.16, smoothstep(30.0, 75.0, alat));
-    float snow = smoothstep(snowLine, snowLine + 0.1, hBig * (0.75 + 0.5 * rg));
-    snow = max(snow, smoothstep(73.0, 78.0, lat + nC * 4.0));
-    snow = max(snow, smoothstep(0.06, 0.22, hBig) * smoothstep(58.0, 66.0, alat)); // Greenland ice sheet
-    snow = max(snow, smoothstep(-61.0, -66.0, lat + nC * 4.0));
-    lc = mix(lc, cSnow, snow);
-
-    // ---- ocean colour: deep blue, turquoise over the shelf
-    float shallow = smoothstep(0.02, 0.45, shelf + (nC - 0.5) * 0.1);
-    vec3 oc = mix(vec3(0.008, 0.04, 0.1), vec3(0.015, 0.1, 0.2), smoothstep(0.0, 0.25, shallow));
-    oc = mix(oc, vec3(0.03, 0.27, 0.33), smoothstep(0.35, 0.95, shallow) * 0.8);
+    // up close the map is soft (one texel is several km), so a touch of fine value noise keeps the ground textured
+    float nD = mix(0.5, vnoise(vP * 160.0) * 0.6 + vnoise(vP * 410.0) * 0.4, wD);
+    vec3 lc = surf.rgb * 0.92 * (0.9 + 0.2 * nD);
+    vec3 oc = surf.rgb * 1.15 + vec3(0.0, 0.01, 0.025);
 
     // ---- light it
     float dif = max(ndl, 0.0);
@@ -302,16 +204,27 @@ const OCEAN_FRAG = /* glsl */ `
 
     #ifdef CLOUD_SHADOW
       // clouds a little toward the sun cast soft shadows on the ground
-      float cs = cloudCover(normalize(vP + uSun * 0.02));
-      col *= 1.0 - cs * 0.5 * day;
+      vec2 sOff = vec2(dot(uSun, east) / max(cos(radians(lat)), 0.2) / 6.2832, dot(uSun, north) / 3.1416) * 0.012;
+      float cs = cloudCover(vTex + sOff, vP);
+      col *= 1.0 - cs * 0.45 * day;
     #endif
 
-    // ---- night: metro lights, switched on in a west → east wave during the intro
+    // ---- night: NASA Black Marble city lights, a gentle blend, switched on in a west → east wave during the intro
     float lonN = fract((lon + 180.0) / 360.0);
     float front = mix(-0.1, 1.15, smoothstep(0.2, 0.85, uIntro));
     float on = smoothstep(lonN, lonN + 0.06, front);
-    float sparkle = smoothstep(0.6, 0.95, vnoise(vP * 420.0)) * 1.6 + smoothstep(0.55, 0.85, nD) * 0.3;
-    float lights = smoothstep(0.08, 0.9, geo.g) * sparkle * (1.0 - smoothstep(-0.25, 0.08, ndl0)) * uLights * on * land;
+    float cityMap = smoothstep(0.03, 0.75, texture2D(uData, vTex).g);
+    // close up, one Black Marble texel covers many pixels: split it into 8 x 8 cells and light a share of
+    // them (more where the city is brighter) as soft points, so cities read as clusters of lights
+    vec2 cellUv = vTex * uMapSize * 8.0;
+    vec2 tw2 = fwidth(vTex) * uMapSize;
+    float zoom = smoothstep(3.0, 10.0, 1.0 / max(min(tw2.x, tw2.y), 1e-5)); // pixels per texel, most magnified axis
+    if (zoom > 0.0) {
+      float hc = hash12(floor(cellUv));
+      float pt = smoothstep(0.55, 0.05, length(fract(cellUv) - 0.5));
+      cityMap = mix(cityMap, cityMap * 0.15 + step(1.0 - cityMap * 0.85, hc) * pt * 1.7 * sqrt(cityMap), zoom);
+    }
+    float lights = cityMap * 0.95 * (1.0 - smoothstep(-0.25, 0.08, ndl0)) * uLights * on * land;
     col += mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.85, 0.6), clamp(lights - 0.6, 0.0, 1.0)) * lights;
 
     // ---- air: warm twilight band, blue haze toward the limb, glowing rim
@@ -337,8 +250,10 @@ const CLOUD_VERT = /* glsl */ `
   varying vec3 vNW;
   varying vec3 vW;
   varying vec3 vP;
+  varying vec2 vTex;
   void main() {
     vP = normalize(position);
+    vTex = vec2(uv.x + 0.25, uv.y); // SphereGeometry's u = 0 sits at lon -90°; the maps start at lon -180°
     vNW = normalize(mat3(modelMatrix) * normal);
     vec4 w = modelMatrix * vec4(position, 1.0);
     vW = w.xyz;
@@ -353,10 +268,10 @@ const CLOUD_FRAG = /* glsl */ `
   varying vec3 vNW;
   varying vec3 vW;
   varying vec3 vP;
-  ${NOISE_GLSL}
+  varying vec2 vTex;
   ${CLOUD_GLSL}
   void main() {
-    float c = cloudCover(vP);
+    float c = cloudCover(vTex, vP);
     if (c < 0.003) discard;
     vec3 n = normalize(vNW);
     float ndl = dot(n, uSun);
@@ -897,18 +812,18 @@ export class GlobeScene {
   static async create(settings: TierSettings, alive: () => boolean): Promise<GlobeScene | null> {
     await yieldToMain();
     if (!alive()) return null;
-    const earth = await buildEarth(settings.maskSize, settings.geoSize, settings.cityLights, alive);
-    if (!earth) return null;
-    await yieldToMain();
-    if (!alive()) {
-      earth.mask.dispose();
-      earth.geo.dispose();
-      return null;
-    }
+    // the NASA maps download and decode (off the main thread) while the land dots are computed
+    const maps = loadEarthMaps(settings.mapSize);
+    const free = () => void maps.then((m) => m && (m.surface.dispose(), m.data.dispose()));
     const land = await landData(settings.landSamples, false, alive);
     if (!land) {
-      earth.mask.dispose();
-      earth.geo.dispose();
+      free();
+      return null;
+    }
+    const earth = await maps;
+    if (!earth) throw new Error("earth maps failed to load");
+    if (!alive()) {
+      free();
       return null;
     }
     await yieldToMain();
@@ -968,7 +883,7 @@ export class GlobeScene {
   private view = { w: 0, h: 0, fov: 0, ox: 0, oy: 0 };
   private camera: THREE.PerspectiveCamera | null = null;
 
-  private constructor(settings: TierSettings, land: LandData, earth: EarthTextures) {
+  private constructor(settings: TierSettings, land: LandData, earth: EarthMaps) {
     this.settings = settings;
     this.cityDirs = ROUTE.map((c) => latLonToVec(c.lat, c.lon));
     this.cityLat = ROUTE.map((c) => c.lat * DEG);
@@ -978,20 +893,19 @@ export class GlobeScene {
     const sharedSun = { value: this.sun };
     const uUnroll = this.unrollUniform;
 
-    this.track(earth.mask);
-    this.track(earth.geo);
+    this.track(earth.surface);
+    this.track(earth.data);
     const noise = this.track(makeNoiseTexture());
     const cloudUniforms = {
-      uNoise: { value: noise },
+      uData: { value: earth.data },
       uCloudTime: this.cloudTime,
       uFocus: { value: this.focus },
       uClear: this.clearUniform,
     };
-    const cloudDefines: Record<string, string | number> = { CLOUD_OCT: settings.cloudOct };
 
-    /* the painted earth: a uv grid wrapped into a sphere by the shader (seam at lon −45°, so the map opens in the
-       Atlantic); land, relief, climate, shelf and city lights come from the earth textures + noise */
-    const surfDefines: Record<string, string | number> = { ...cloudDefines, OCEAN_OCT: settings.oceanNoise, SURF_OCT: settings.surfOct };
+    /* the real earth: a uv grid wrapped into a sphere by the shader (seam at lon −45°, so the map opens in the
+       Atlantic); colour, ocean mask, clouds and city lights come from the NASA maps */
+    const surfDefines: Record<string, string | number> = { OCEAN_OCT: settings.oceanNoise };
     if (settings.cloudShadow) surfDefines.CLOUD_SHADOW = "";
     this.oceanMat = this.track(
       new THREE.ShaderMaterial({
@@ -1000,12 +914,11 @@ export class GlobeScene {
         defines: surfDefines,
         uniforms: {
           ...cloudUniforms,
-          uMask: { value: earth.mask },
-          uMaskLod: { value: Math.log2(settings.maskSize / 1024) + 0.5 }, // ≈ the same softness on every tier
-          uGeo: { value: earth.geo },
+          uNoise: { value: noise },
+          uSurface: { value: earth.surface },
+          uMapSize: { value: new THREE.Vector2(settings.mapSize, settings.mapSize / 2) },
           uLights: { value: settings.cityLights ? 1 : 0 },
           uIntro: { value: 0 },
-          uBump: { value: 0.06 },
           uUnroll,
           uSun: sharedSun,
           uGlacier: { value: GLACIER },
@@ -1057,14 +970,13 @@ export class GlobeScene {
     this.dots = this.buildLand(land);
     this.root.add(this.dots);
 
-    /* clouds: a thin shell with drifting procedural weather; it parts around the destination on the approach */
+    /* clouds: a thin shell with the NASA cloud map, drifting; it parts around the destination on the approach */
     this.clouds = new THREE.Mesh(
       this.track(new THREE.SphereGeometry(1.007, settings.cloudSeg[0], settings.cloudSeg[1])),
       this.track(
         new THREE.ShaderMaterial({
           vertexShader: CLOUD_VERT,
           fragmentShader: CLOUD_FRAG,
-          defines: cloudDefines,
           uniforms: { ...cloudUniforms, uSun: sharedSun, uEmber: { value: EMBER }, uFade: { value: 1 } },
           ...over,
         }),
@@ -1414,10 +1326,10 @@ export class GlobeScene {
     this.root.visible = on;
   }
 
-  /** The earth and noise textures, uploaded during the warm-up instead of in the first visible frame. */
+  /** The NASA maps and the noise texture, uploaded during the warm-up instead of in the first visible frame. */
   textures(): THREE.Texture[] {
     const u = this.oceanMat.uniforms;
-    return [u.uMask.value, u.uGeo.value, u.uNoise.value];
+    return [u.uSurface.value, u.uData.value, u.uNoise.value];
   }
 
   /* --------------------------------------------------------------- update */
@@ -1550,7 +1462,7 @@ export class GlobeScene {
     const sweep = 1 - easeInOut(smooth(0, 0.75, intro));
     if (sweep > 0) this.sun.applyAxisAngle(this.up, sweep * 2.6);
 
-    // painted earth, clouds, print dots (the dots only grow in for the printed map)
+    // earth, clouds, print dots (the dots only grow in for the printed map)
     const om = this.oceanMat.uniforms;
     om.uTime.value = time;
     om.uPaper.value = paper;

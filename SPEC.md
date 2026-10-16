@@ -32,14 +32,11 @@ coordinates (boarding-pass detail).
 
 ## 4. Signature 3D moment — the route globe
 
-**What you see.** A real-looking, painted Earth, made entirely in code. Land comes from the hand-plotted lon/lat
-outlines, softened and ragged by noise so coasts are irregular; it is coloured by climate (rainforest, green belts,
-steppe, sand seas with wind-blown dunes, tundra) from latitude belts plus hand-placed deserts and wet forests, with
-mountain ridges (Himalaya, Andes, Rockies, Alps, Atlas, East African highlands, Southern Alps, Japanese Alps, Iceland)
-lit by relief shading and capped with snow, and ice on Greenland and Antarctica. Oceans are deep blue with a turquoise
-continental shelf and a sun glitter path; a warm terminator band, blue haze toward the limb, a scattering shell and a
-back-face halo make the air. A thin cloud layer drifts slowly (wet equator, clear subtropics, stormy mid-latitudes)
-and shadows the ground on the high tier. On the night side metro areas sparkle (~80 hand-listed cities). Six
+**What you see.** The real Earth from public-domain NASA imagery: the Blue Marble (with topography and bathymetry
+shading) as the day side, an ocean mask so only the water carries the sun glitter path, a gentle Black Marble
+city-light blend on the night side, and a subtle drifting layer from the Blue Marble cloud map that shadows the ground
+on the high tier. A warm terminator band, blue haze toward the limb, a scattering shell and a back-face halo make the
+air. Six
 destinations carry pulsing ring markers with light pillars; ember arcs (great-circle paths lifted by distance) connect
 them, and in the hero a light keeps travelling along each arc. Stars include a faint Milky Way band.
 
@@ -61,22 +58,21 @@ continuous number `p` (−1 = hero, 0…5 = city cards, 6 = outro, 7 = flat map)
 - **6 → 7, the unforgettable moment: the globe unrolls into the printed route map.** The sphere peels open at the
   mid-Atlantic seam (lon −45°) into a Pacific-centred 2:1 equirectangular map, so all five legs stay continuous. The
   camera swings east over Africa and the Indian Ocean to face the map while the field of view narrows 34° → 26° (a
-  gentle dolly zoom), the view offset centres, the clouds clear, and the palette turns from the painted earth to paper:
+  gentle dolly zoom), the view offset centres, the clouds clear, and the palette turns from the real earth to paper:
   surface → sand, halftone ink dots grow in for the land, arcs → solid rust lines, markers → rust rings; stars and atmosphere fade out. A paper backdrop behind the
   transparent canvas fades in, and the perforated top edge of the Approach section continues the paper.
 Clicking a marker scrolls to that city's card (screen-space
 picking with a 26 px radius → ≥ 44 px tap target).
 
 **Technique.** React Three Fiber canvas (`frameloop="demand"`), scene built imperatively in plain three.js
-(`GlobeScene` class): the earth surface is the uv-grid sphere shaded from two textures built at load time in
-`earth.ts` (an R8 land mask filled by a 2D canvas from the outlines, and a small RGBA texture with terrain height,
-metro light, blurred land cover and aridity) plus value noise; ridges get their relief from finite-difference noise
-gradients (screen-space derivatives would shade them in 2×2 blocks); clouds are a sphere shell with domain-warped noise.
+(`GlobeScene` class): the earth surface is the uv-grid sphere shaded from two NASA maps packed offline into WebP
+(`earth-map.ts`: Blue Marble colour + ocean mask; clouds + Black Marble lights; 2048 px high tier, 1024 px otherwise),
+loaded with the 3D chunk and decoded off the main thread; clouds are a sphere shell reading the same cloud map.
 The map's land dots are one instanced draw of 4-vertex quads shaded as SDF discs (alpha-to-coverage with
 MSAA, discard without); the ocean is a uv grid wrapped into a sphere by its vertex shader; arcs are camera-facing
 ribbons that rebuild the lifted great-circle path in the vertex shader; markers are shader quads, pillars one
 instanced cylindrical billboard draw. The unroll formula lives in `unroll.ts` twice — as GLSL for the ocean, dot and
-arc vertex shaders and as a TS twin for markers, aircraft and picking. The earth textures are computed in row slices that yield to the main thread. Camera framing uses `setViewOffset` so the globe
+arc vertex shaders and as a TS twin for markers, aircraft and picking. The NASA maps download while the land dots are computed in slices that yield to the main thread. Camera framing uses `setViewOffset` so the globe
 sits beside the cards without moving the 3D scene. Scroll is read by one Lenis instance (`lerp 0.1`) — the camera maps
 scroll directly (no second smoothing layer).
 
@@ -106,18 +102,17 @@ ANGLE / D3D11 the inline version took 4–7 s to compile, the texture version un
 (desktop 1440×900, Chrome / ANGLE D3D11): the globe is revealed ≈ 2.3 s after navigation start on low, ≈ 2.8 s on medium (the
 default there), ≈ 3.4 s on high (it was 4.1 / 6.7 / 9.6 s with inline noise).
 
-**Reduced motion** (OS setting respected by default; "Full motion" toggle in the header with `aria-pressed`, stored in
-localStorage, `?motion=full|reduced` overrides): no autonomous rotation, no pulsing, no flowing dashes, no pointer
+**Reduced motion** (full motion is the default; the "Full motion" toggle in the header with `aria-pressed` turns it
+off, stored in localStorage, `?motion=full|reduced` overrides): no autonomous rotation, no pulsing, no flowing dashes, no pointer
 parallax, no intro, no loader curtain, no 2D reveals / magnetic buttons / custom cursor. The camera **cuts** to the city
 whose card is closest to the viewport centre instead of flying; passed arcs are drawn complete; the globe cuts to the
 flat map past `p = 6.5`.
 
-**No WebGL / context lost.** A code-made SVG poster is rendered by the server behind the canvas: a simplified version
-of the realistic hero Earth, projected at build time in perspective from the hero camera (distance 4.3, 20° N 16° W) and
-sized in CSS to match the 3D globe it cross-fades into (phones `min(98.6vw, 71lvh)`, wider screens `94lvh`). Solid land
-from the same polygons as the 3D mask, climate tints from the shared `climate.ts` table (deserts, wet forest, tundra,
-ice), deep blue ocean with a shelf glow, a few cloud banks, a blurred night side with a dusk rim on the left, blue
-atmosphere rim, route arcs and pins (~26 KB of the HTML, 37 KB gzipped page). It stays if WebGL is missing, the renderer is software-only, or the context is lost. The
+**No WebGL / context lost.** An SVG poster is rendered by the server behind the canvas, projected in perspective from
+the hero camera (distance 4.3, 20° N 16° W) and sized in CSS to match the 3D globe it cross-fades into (phones
+`min(98.6vw, 71lvh)`, wider screens `94lvh`): the Earth is a 50 KB pre-render of the same NASA Blue Marble map with
+clouds (`public/textures/poster-globe.webp`), under a blurred vector night side with a dusk rim on the left, a blue
+atmosphere rim, route arcs and pins. It stays if WebGL is missing, the renderer is software-only, or the context is lost. The
 unroll block also carries a server-rendered SVG of the flat route map (same projection, halftone land rows, rust route,
 labelled pins; `role="img"` with a label), so every visitor ends on the printed map. The page is fully usable without 3D.
 
@@ -280,7 +275,7 @@ Zero downloaded images, models, HDRIs or audio. No runtime CDN requests.
   one module imported after `load` + idle, so the first-load bundle stays within 2 KB of the pre-upgrade build.
 - 3D chunk (three + R3F + scene) loaded with `next/dynamic({ ssr: false })` only after window `load` +
   `requestIdleCallback` (2.5 s timeout) and the GPU probe, never during hydration; ≈ 255 KB gzip (≤ 270 KB).
-- No textures at all (everything procedural); draw calls < 25 (20 on high); ≤ 80k triangles on high.
+- Textures: only the NASA earth maps (WebP, ≈0.7 MB on high, ≈0.2 MB otherwise, loaded with the 3D chunk); draw calls < 25 (20 on high); ≤ 80k triangles on high.
 - Idle hero ≤ 30 fps, paper sections 0 frames; full rate only for 1.5 s after activity.
 - No per-frame allocations, no React state per frame; card highlighting updates the DOM only when the index changes.
 - Fonts: 3 families, `display: swap`, mono not preloaded.

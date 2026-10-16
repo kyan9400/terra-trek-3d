@@ -1,11 +1,10 @@
-/* Projection of the land polygons, climate zones, clouds and route arcs, computed at build time.
-   Used by the no-WebGL / loading poster (and, below, the flat route map). The poster globe is drawn
-   in perspective from the 3D hero camera (distance 4.3 radii, looking at 20° N 16° W), so it lines up
-   with the canvas it cross-fades into. */
+/* Projection of the night side, route arcs and pins, computed at build time.
+   Used by the no-WebGL / loading poster (and, below, the flat route map); the poster's Earth itself is a
+   pre-rendered NASA Blue Marble image. Everything is drawn in perspective from the 3D hero camera
+   (distance 4.3 radii, looking at 20° N 16° W), so it lines up with the canvas it cross-fades into. */
 
 import { ROUTE } from "@/lib/route";
-import { LAND_RAW, WATER_RAW, isLand } from "@/components/globe/land";
-import { CLIMATE } from "@/components/globe/climate";
+import { isLand } from "@/components/globe/land";
 import { MAP_LON0, mapLon } from "@/components/globe/unroll";
 
 type V = [number, number, number];
@@ -37,112 +36,6 @@ const project = (p: V) => {
   const s = K / (D - dot(p, center));
   return [C + dot(p, east) * s, C - dot(p, north) * s] as const;
 };
-/** Surface point, pushed onto the silhouette when it is round the back (clips filled shapes to the disc). */
-const projectClamped = (v: V) => {
-  if (dot(v, center) >= HORIZON) return project(v);
-  const e = dot(v, east);
-  const n = dot(v, north);
-  const l = Math.hypot(e, n) || 1;
-  return [C + (e / l) * R, C - (n / l) * R] as const;
-};
-
-/** A lon/lat ring as a closed path, edges densified to ~2° so clipped runs follow the rim. */
-function ringPath(pts: number[]) {
-  let d = "";
-  let seen = false;
-  let px = 1e9;
-  let py = 1e9;
-  const n = pts.length / 2;
-  for (let i = 0; i < n; i++) {
-    const lon0 = pts[i * 2];
-    const lat0 = pts[i * 2 + 1];
-    const lon1 = pts[((i + 1) % n) * 2];
-    const lat1 = pts[((i + 1) % n) * 2 + 1];
-    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(lon1 - lon0), Math.abs(lat1 - lat0)) / 2));
-    for (let s = 0; s < steps; s++) {
-      const t = s / steps;
-      const v = vec(lat0 + (lat1 - lat0) * t, lon0 + (lon1 - lon0) * t);
-      if (dot(v, center) > HORIZON) seen = true;
-      const [fx, fy] = projectClamped(v);
-      const x = Math.round(fx);
-      const y = Math.round(fy);
-      if (Math.abs(x - px) + Math.abs(y - py) < 2) continue;
-      // relative moves: shorter HTML (integer units are ~1.4 px at the largest size)
-      d += d ? `l${x - px} ${y - py}` : `M${x} ${y}`;
-      px = x;
-      py = y;
-    }
-  }
-  return seen ? d + "Z" : "";
-}
-
-/** An ellipse in lat/lon degrees around (lat, lon). */
-function blob(lat: number, lon: number, rLat: number, rLon: number) {
-  const pts: number[] = [];
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2;
-    pts.push(lon + Math.cos(a) * rLon, Math.max(-89, Math.min(89, lat + Math.sin(a) * rLat)));
-  }
-  return ringPath(pts);
-}
-
-export const LAND = LAND_RAW.map(ringPath).join("");
-export const WATER = WATER_RAW.map(ringPath).join("");
-
-/** Climate overlays (clipped to the land in the SVG): sand deserts, deep wet forests, polar tundra and ice. */
-export const DESERTS = CLIMATE.filter((c) => c[4] >= 0.4)
-  .map(([la, lo, rLa, rLo, amt]) => ({ d: blob(la, lo, rLa * 1.25, rLo * 1.25), o: Math.min(1, amt * 1.25) }))
-  .filter((c) => c.d);
-export const FORESTS = CLIMATE.filter((c) => c[4] <= -0.4)
-  .map(([la, lo, rLa, rLo, amt]) => ({ d: blob(la, lo, rLa * 1.2, rLo * 1.2), o: Math.min(1, -amt) }))
-  .filter((c) => c.d);
-const cap = (lat: number) => {
-  const pts: number[] = [];
-  for (let lon = -180; lon < 180; lon += 6) pts.push(lon, lat);
-  return ringPath(pts);
-};
-export const TUNDRA = cap(58);
-export const ICE = cap(71) + blob(73, -41, 9, 17);
-
-/** A few soft cloud banks: [lat, lon, length°, width°, tilt°, opacity] (ITCZ, mid-latitude storm tracks). */
-const CLOUDS: [number, number, number, number, number, number][] = [
-  [52, -32, 16, 4, -18, 0.75],
-  [47, -18, 9, 3, 24, 0.6],
-  [58, -8, 11, 3, -10, 0.55],
-  [41, -50, 12, 3.5, 30, 0.55],
-  [6, -30, 14, 2.5, 4, 0.5],
-  [4, -6, 8, 2.5, -6, 0.45],
-  [8, 14, 12, 3, 6, 0.4],
-  [-4, -38, 7, 2.5, -12, 0.4],
-  [-30, -20, 16, 4, -24, 0.55],
-  [-38, 2, 12, 3, 18, 0.5],
-  [30, -62, 8, 3, -30, 0.45],
-  [64, -38, 10, 3, 8, 0.5],
-];
-export const CLOUD_ELLIPSES = CLOUDS.map(([la, lo, len, wid, tilt, o]) => {
-  const v = vec(la, lo);
-  const f = dot(v, center);
-  if (f < HORIZON + 0.08) return null;
-  const [x, y] = project(v);
-  // local east/north on screen give the foreshortening and the heading
-  const [ex, ey] = project(vec(la, lo + 1));
-  const [nx, ny] = project(vec(la + 1, lo));
-  const ang = (Math.atan2(ey - y, ex - x) * 180) / Math.PI - tilt;
-  const sx = Math.hypot(ex - x, ey - y);
-  const sy = Math.hypot(nx - x, ny - y);
-  const rad = (ang * Math.PI) / 180;
-  // three puffs along the bank: a big core and two smaller tails
-  return [
-    [0, 1, 1],
-    [-0.62, 0.55, 0.8],
-    [0.58, 0.6, 0.75],
-  ].map(([k, sc, oo]) => {
-    const dx = Math.cos(rad) * k * len * sx;
-    const dy = Math.sin(rad) * k * len * sx;
-    return { x: f1(x + dx), y: f1(y + dy + (k ? wid * sy * 0.3 : 0)), rx: f1(len * sx * sc), ry: f1(wid * sy * (k ? 0.9 : 1.2)), a: f1(ang), o: Math.round(o * oo * 100) / 100 };
-  });
-}).filter((c): c is NonNullable<typeof c> => c !== null).flat();
-
 /* Night side for the hero sun (the 3D look: sun from the right and a little above, terminator on the left).
    The night is "the disc minus the region lit above a level" (even-odd fill), blurred in the SVG into a
    soft twilight band. Shading is orthographic, close enough at this size. */

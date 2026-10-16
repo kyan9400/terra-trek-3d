@@ -22,13 +22,18 @@ bloom pass — less JavaScript and a cheaper GPU frame.
 
 ## The signature 3D technique
 
-- **Land from code.** Continents are hand-plotted lon/lat polygons (`src/components/globe/land.ts`). Up to 60 000
-  points on a Fibonacci sphere are tested against them; land points become one instanced draw of 4-vertex quads shaded
-  as round SDF dots (alpha-to-coverage with MSAA). Hand-placed terrain (`terrain.ts`) lifts and shades the big ranges
-  and adds snow on the day side; ~80 metro areas light the night side.
+- **The real Earth.** The globe wears public-domain NASA imagery: the Blue Marble (topography and bathymetry, with
+  an ocean mask so only water glitters), a gentle Black Marble city-light blend on the night side, and a subtle
+  drifting layer from the Blue Marble cloud map that parts over each destination on the approach. The maps are
+  packed offline into WebP (`public/textures/`, 2048 px on the high tier and 1024 px elsewhere, ≈0.9 MB for both
+  sizes), loaded with the 3D chunk and decoded off the main thread (`createImageBitmap`). Close up, each city-light
+  texel is split into points of light so cities read as clusters rather than blurred squares.
 - **Ocean & atmosphere.** A uv grid wrapped into a sphere by its shader: night/day shading, a warm twilight band, a 15°
   graticule, a sun glint broken into glitter by value noise, a fresnel sky reflection; a thin front-face scattering
   shell plus a back-face halo.
+- **Printed map from code.** Continents are also hand-plotted lon/lat polygons (`src/components/globe/land.ts`). Up to
+  60 000 points on a Fibonacci sphere are tested against them; land points become one instanced draw of round SDF
+  dots (alpha-to-coverage with MSAA) that grow in as halftone ink when the globe unrolls into the paper map.
 - **Flight arcs.** Each leg is a camera-facing ribbon; the vertex shader rebuilds the lifted great-circle path, the
   fragment shader draws it from 0 to 1 with a bright head and a short contrail. A tiny chevron aircraft rides the
   tangent; light pillars mark the cities.
@@ -50,13 +55,14 @@ bloom pass — less JavaScript and a cheaper GPU frame.
   DPR cap 1 / 1.5 / 2, adapted at runtime by `PerformanceMonitor`.
 - The 3D chunk loads after the page's `load` event when the main thread is idle, and only if a tiny GPU probe finds
   a hardware renderer (software renderers keep the poster; `?quality=` forces 3D on). The scene is built in slices
-  and shaders are warmed with `compileAsync` before the canvas fades in over a server-rendered SVG poster of the same globe.
-- No textures, no per-frame allocations, no React state per frame, no `backdrop-filter` near the canvas.
+  and shaders are warmed with `compileAsync` before the canvas fades in over a server-rendered SVG poster of the same
+  globe (its Earth is a 50 KB pre-render of the same NASA map, from the hero camera).
+- No per-frame allocations, no React state per frame, no `backdrop-filter` near the canvas.
   20 draw calls and about 80k triangles on the high tier.
 - The 2D extras (section dots, reveals, magnetic buttons, cursor) are one module imported after `load` + idle; the
   hero headline reveal is CSS-only and transform-only, so the LCP text paints on the first frame.
-- Reduced motion is respected by default, with a "Full motion" toggle (`aria-pressed`, remembered;
-  `?motion=full|reduced`). Reduced motion cuts between cities (and to the flat map) instead of flying.
+- Full motion by default; the "Full motion" toggle (`aria-pressed`, remembered; `?motion=full|reduced`) switches
+  to reduced motion. Reduced motion cuts between cities (and to the flat map) instead of flying.
 - Without WebGL2, on a software renderer, or after a lost context, the poster stays and the page works fully.
 
 Measured from the `npm run build` output: First Load JS for `/` ≈ 185 KB gzip counting the `noModule` polyfill
@@ -78,14 +84,16 @@ Useful URL flags: `?quality=low|medium|high`, `?motion=full|reduced`.
 ```
 src/app/                 layout, page, 404, OG image, icon, manifest, robots, sitemap, globals.css
 src/components/          header pieces, poster, flat map, scroll director, stage loader, Polish (lazy 2D extras)
-src/components/globe/    GlobeScene (three.js), GlobeCanvas (R3F host), land mask, terrain + metros, unroll math
+src/components/globe/    GlobeScene (three.js), GlobeCanvas (R3F host), NASA earth maps loader, land mask, terrain, unroll math
+public/textures/         NASA Earth maps (WebP) and the poster's pre-rendered globe
 src/lib/                 route data, quality tiers, motion preference, shared stage state
 SPEC.md                  concept, design system, copy and budgets
 ```
 
 ## Credits
 
-See [CREDITS.md](CREDITS.md). Fonts are SIL OFL; libraries are MIT/Apache-2.0; everything visual is drawn in code.
+See [CREDITS.md](CREDITS.md). The Earth imagery is public-domain NASA data; fonts are SIL OFL; libraries are
+MIT/Apache-2.0; everything else visual is drawn in code.
 
 ## Copyright
 

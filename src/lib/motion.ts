@@ -1,9 +1,8 @@
 /* ==========================================================================
    MOTION PREFERENCE — a tiny external store.
-   The OS "reduce motion" setting is respected by default, but many Windows
-   users turn animations off for speed, not comfort, so the visitor can turn
-   full motion back on. The choice is remembered (localStorage) and
-   ?motion=full|reduced in the URL wins over both.
+   Full motion is the default on every first visit. The visitor can switch
+   to reduced motion with the toggle; the choice is remembered (localStorage)
+   and ?motion=full|reduced in the URL wins over it.
    ========================================================================== */
 
 const KEY = "terra-trek-motion";
@@ -26,8 +25,7 @@ function readChoice(): Choice | null {
 function init() {
   if (reduced !== null) return;
   const choice = readChoice();
-  const system = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  reduced = choice === "full" ? false : choice === "reduced" ? true : system;
+  reduced = choice === "reduced";
   document.documentElement.classList.toggle("reduce-motion", reduced);
 }
 
