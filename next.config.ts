@@ -8,7 +8,7 @@ const base = "/terra-trek-3d";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  env: { NEXT_PUBLIC_BASE_PATH: pages ? base : "" },
+  env: { NEXT_PUBLIC_PORTFOLIO_URL: pages ? "https://kyan9400.github.io/alhassan_portfolio/" : "https://alhassan-portfolio-sigma.vercel.app", NEXT_PUBLIC_BASE_PATH: pages ? base : "" },
   ...(pages
     ? {
         output: "export",

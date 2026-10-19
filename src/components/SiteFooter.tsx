@@ -16,7 +16,7 @@ export default function SiteFooter() {
         </div>
         <div>
           <p>Design &amp; development</p>
-          <a href="https://alhassan-portfolio-sigma.vercel.app">Alhassan Alfarran</a>
+          <a href={process.env.NEXT_PUBLIC_PORTFOLIO_URL ?? "https://alhassan-portfolio-sigma.vercel.app"}>Alhassan Alfarran</a>
           <br />
           <a href="https://github.com/kyan9400">GitHub</a>
         </div>
