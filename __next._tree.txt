@@ -1,0 +1,5 @@
+:HL["/terra-trek-3d/_next/static/chunks/44x7ql7ys0nck.css","style"]
+:HL["/terra-trek-3d/_next/static/media/8feca5bfbcc904f1-s.p.1xt3x57tcdmbv.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/terra-trek-3d/_next/static/media/aaeb013c77132fba-s.p.1wh0qzzwls4_i.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/terra-trek-3d/_next/static/media/c47649aa31f9e140-s.p.3lxpqujs87tck.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}},"staleTime":300,"buildId":"sv1c_h22Woyvpb-kycphD"}
